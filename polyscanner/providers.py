@@ -15,7 +15,7 @@ class PolymarketUSPublicClient:
     def __init__(self, timeout: int = 20) -> None:
         self.timeout = timeout
 
-    def active_bitcoin_markets(self) -> list[dict[str, Any]]:
+    def active_crypto_markets(self) -> list[dict[str, Any]]:
         response = requests.get(
             f"{self.BASE_URL}/v1/markets",
             params={"limit": 100, "active": "true", "categories": "crypto"},
@@ -23,8 +23,10 @@ class PolymarketUSPublicClient:
         )
         response.raise_for_status()
         payload = response.json()
-        markets = payload.get("markets", [])
-        return [market for market in markets if is_bitcoin_market(market)]
+        return payload.get("markets", [])
+
+    def active_bitcoin_markets(self) -> list[dict[str, Any]]:
+        return [market for market in self.active_crypto_markets() if is_bitcoin_market(market)]
 
     def market_book(self, slug: str) -> dict[str, Any]:
         response = requests.get(

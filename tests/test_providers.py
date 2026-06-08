@@ -13,5 +13,7 @@ def test_catalog_filters_unrelated_markets():
         ]
     }
     with patch("polyscanner.providers.requests.get", return_value=response):
-        markets = PolymarketUSPublicClient().active_bitcoin_markets()
+        client = PolymarketUSPublicClient()
+        assert len(client.active_crypto_markets()) == 2
+        markets = client.active_bitcoin_markets()
     assert [market["slug"] for market in markets] == ["btc-64k"]

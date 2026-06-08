@@ -16,3 +16,10 @@ def test_storage_records_estimate(tmp_path):
     rows = store.recent_estimates()
     assert len(rows) == 1
     assert rows[0]["slug"] == "btc-64k"
+
+
+def test_storage_records_zero_market_scan(tmp_path):
+    store = SnapshotStore(tmp_path / "scanner.db")
+    store.record_scan("2026-06-08T22:00:00+00:00", 0)
+    rows = store.recent_scans()
+    assert rows[0]["eligible_markets"] == 0

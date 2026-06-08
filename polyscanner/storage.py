@@ -65,3 +65,11 @@ class SnapshotStore:
                 "SELECT * FROM estimates ORDER BY calculated_at DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def recent_scans(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM scans ORDER BY scanned_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
