@@ -113,7 +113,6 @@ else:
         width="stretch",
         hide_index=True,
     )
-    st.caption("Exact conditions for the ten highest modeled edges")
     ranked_contracts = sorted(
         result.contracts,
         key=lambda item: item[1].edge_after_fee
@@ -121,13 +120,49 @@ else:
         else float("-inf"),
         reverse=True,
     )
-    for contract, _ in ranked_contracts[:10]:
-        with st.expander(f"{contract.market_id} · {contract.question}"):
-            st.write(contract.rules)
-            st.caption(
-                f"Venue: {contract.venue} | Close: {contract.expires_at:%Y-%m-%d %H:%M UTC} | "
-                f"YES bid/ask: {contract.best_bid} / {contract.best_ask} | Ask size: {contract.yes_ask_size}"
-            )
+    st.subheader("Contract inspector")
+    st.caption(
+        "Verify what a selected contract actually settles on before trusting its model score."
+    )
+    contract_labels = {
+        (
+            f"{contract.expires_at:%b %d %H:%M UTC} · "
+            f"${contract.strike_usd:,.0f}–${contract.cap_strike_usd:,.2f} · "
+            f"YES {contract.best_ask:.0%}"
+        ): (contract, estimate)
+        for contract, estimate in ranked_contracts[:50]
+        if contract.cap_strike_usd is not None and contract.best_ask is not None
+    }
+    selected_label = st.selectbox("Inspect a contract", list(contract_labels))
+    selected_contract, selected_estimate = contract_labels[selected_label]
+    detail_cols = st.columns(4)
+    detail_cols[0].metric(
+        "Settlement range",
+        f"${selected_contract.strike_usd:,.0f}–${selected_contract.cap_strike_usd:,.2f}",
+    )
+    detail_cols[1].metric("Kalshi YES ask", f"{selected_contract.best_ask:.0%}")
+    detail_cols[2].metric("Modeled probability", f"{selected_estimate.probability:.1%}")
+    detail_cols[3].metric(
+        "After-fee model gap",
+        f"{selected_estimate.edge_after_fee:+.1%}",
+    )
+    st.info(
+        f"**What must happen:** The simple average of 60 CF Benchmarks BRTI readings "
+        f"during the final minute must be inside "
+        f"**${selected_contract.strike_usd:,.0f}–${selected_contract.cap_strike_usd:,.2f}** "
+        f"at **{selected_contract.expires_at:%Y-%m-%d %H:%M UTC}**."
+    )
+    st.warning(
+        "The model uses Coinbase BTC-USD, but settlement uses CF Benchmarks BRTI. "
+        "A small Coinbase/BRTI difference near a range boundary can change the outcome."
+    )
+    with st.expander("View official rule text"):
+        st.write(selected_contract.rules)
+        st.caption(
+            f"Ticker: {selected_contract.market_id} | YES bid/ask: "
+            f"{selected_contract.best_bid} / {selected_contract.best_ask} | "
+            f"Ask size: {selected_contract.yes_ask_size}"
+        )
 
 st.subheader("2. Coinbase price and volatility input")
 st.write(
