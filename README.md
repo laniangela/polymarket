@@ -28,6 +28,22 @@ KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/your-private-key.pem
 The dashboard can then test account balance access and read the live CF Benchmarks BRTI feed used
 by Kalshi settlement. It does not contain an order-placement method.
 
+## Continuous signal recorder
+
+Run the recorder in a second terminal while the dashboard is open:
+
+```bash
+source .venv/bin/activate
+kalshi-recorder --max-markets 12
+```
+
+Without credentials it records Coinbase spot and periodically polls public Kalshi order books. With
+credentials it automatically upgrades to synchronized Coinbase, BRTI, and WebSocket order-book
+updates. Observations are written to `data/scanner.db`. It follows the nearest price buckets in the
+earliest BTC events, maintains a heartbeat, and reconnects with bounded exponential backoff. The
+dashboard reports recorder health and recent observations. This process is read-only and has no
+order endpoint.
+
 ## Current agents
 
 - Contract interpreter: validates event, range, expiry, and settlement rules.

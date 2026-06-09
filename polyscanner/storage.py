@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from polyscanner.models import ProbabilityEstimate, ThresholdContract
@@ -37,6 +38,23 @@ class SnapshotStore:
             }.items():
                 if column not in existing:
                     connection.execute(f"ALTER TABLE estimates ADD COLUMN {column} {column_type}")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS recorder_status ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL, started_at TEXT, "
+                "heartbeat_at TEXT NOT NULL, market_count INTEGER NOT NULL DEFAULT 0, "
+                "observation_count INTEGER NOT NULL DEFAULT 0, last_error TEXT)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS feed_observations ("
+                "id INTEGER PRIMARY KEY, observed_at TEXT NOT NULL, source TEXT NOT NULL, "
+                "market_ticker TEXT, coinbase_spot REAL, brti_value REAL, brti_60s_average REAL, "
+                "settlement_window_average REAL, yes_bid REAL, yes_ask REAL, "
+                "yes_bid_size REAL, yes_ask_size REAL)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS feed_observations_time "
+                "ON feed_observations(observed_at DESC)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -94,5 +112,87 @@ class SnapshotStore:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM scans ORDER BY scanned_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_recorder_status(
+        self,
+        state: str,
+        market_count: int,
+        observation_count: int,
+        started_at: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        heartbeat = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO recorder_status("
+                "id, state, started_at, heartbeat_at, market_count, observation_count, last_error"
+                ") VALUES (1, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET state=excluded.state, "
+                "started_at=COALESCE(excluded.started_at, recorder_status.started_at), "
+                "heartbeat_at=excluded.heartbeat_at, market_count=excluded.market_count, "
+                "observation_count=excluded.observation_count, last_error=excluded.last_error",
+                (
+                    state,
+                    started_at,
+                    heartbeat,
+                    market_count,
+                    observation_count,
+                    last_error,
+                ),
+            )
+
+    def recorder_status(self) -> dict[str, object] | None:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM recorder_status WHERE id = 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def record_feed_observation(
+        self,
+        *,
+        observed_at: str,
+        source: str,
+        market_ticker: str | None = None,
+        coinbase_spot: float | None = None,
+        brti_value: float | None = None,
+        brti_60s_average: float | None = None,
+        settlement_window_average: float | None = None,
+        yes_bid: float | None = None,
+        yes_ask: float | None = None,
+        yes_bid_size: float | None = None,
+        yes_ask_size: float | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO feed_observations("
+                "observed_at, source, market_ticker, coinbase_spot, brti_value, "
+                "brti_60s_average, settlement_window_average, yes_bid, yes_ask, "
+                "yes_bid_size, yes_ask_size"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    observed_at,
+                    source,
+                    market_ticker,
+                    coinbase_spot,
+                    brti_value,
+                    brti_60s_average,
+                    settlement_window_average,
+                    yes_bid,
+                    yes_ask,
+                    yes_bid_size,
+                    yes_ask_size,
+                ),
+            )
+
+    def recent_feed_observations(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM feed_observations ORDER BY observed_at DESC LIMIT ?",
+                (limit,),
             ).fetchall()
         return [dict(row) for row in rows]

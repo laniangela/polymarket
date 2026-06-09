@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
 import streamlit as st
 
@@ -120,6 +122,55 @@ cols[3].metric(
     help="Contracts that pass all agent checks and fit the portfolio exposure rules.",
 )
 st.caption(f"Last scan: {result.scanned_at:%Y-%m-%d %H:%M:%S UTC}")
+
+recorder_status = store().recorder_status()
+recent_feed = store().recent_feed_observations(limit=50)
+st.subheader("Live signal recorder")
+if recorder_status is None:
+    st.info(
+        "The continuous recorder has not been started. Run `kalshi-recorder` in a second terminal. "
+        "It works with public data and automatically adds BRTI when Kalshi credentials exist."
+    )
+else:
+    heartbeat = datetime.fromisoformat(str(recorder_status["heartbeat_at"]))
+    heartbeat = heartbeat.replace(tzinfo=heartbeat.tzinfo or timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - heartbeat).total_seconds()
+    state = str(recorder_status["state"])
+    active_states = {"running", "public-rest", "reconnecting"}
+    display_state = "STALE" if state in active_states and age_seconds > 15 else state.upper()
+    recorder_cols = st.columns(4)
+    recorder_cols[0].metric("Recorder", display_state)
+    recorder_cols[1].metric("Tracked contracts", int(recorder_status["market_count"]))
+    recorder_cols[2].metric("Observations", int(recorder_status["observation_count"]))
+    recorder_cols[3].metric("Heartbeat age", f"{age_seconds:.0f}s")
+    if recorder_status.get("last_error"):
+        st.warning(f"Last recorder error: {recorder_status['last_error']}")
+    if recent_feed:
+        latest = recent_feed[0]
+        if latest.get("coinbase_spot") is not None and latest.get("brti_value") is not None:
+            basis = float(latest["coinbase_spot"]) - float(latest["brti_value"])
+            st.caption(
+                f"Latest synchronized Coinbase/BRTI basis: **${basis:+,.2f}**. "
+                "Lag conclusions require accumulated order-book history, not one observation."
+            )
+        with st.expander("Recent synchronized observations"):
+            st.dataframe(
+                pd.DataFrame(recent_feed)[
+                    [
+                        "observed_at",
+                        "source",
+                        "market_ticker",
+                        "coinbase_spot",
+                        "brti_value",
+                        "yes_bid",
+                        "yes_ask",
+                        "yes_bid_size",
+                        "yes_ask_size",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
 
 st.subheader("Best opportunities now")
 st.write(
