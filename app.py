@@ -80,16 +80,22 @@ if not result.contracts:
         "No active Kalshi KXBTC price-range contract closing within 14 days was available."
     )
 else:
-    st.subheader("2. Parsed contracts and probability estimates")
+    st.subheader("2. Dated BTC events and their price-range contracts")
+    st.write(
+        "A **Kalshi event** is the dated question, such as “BTC price range on June 9 at "
+        "5 PM EDT.” A **contract** is one YES/NO price bucket inside that event, such as "
+        "“BTC settles between $63,500 and $63,749.99.” One event therefore contains many "
+        "mutually exclusive contracts."
+    )
     rows = []
     for contract, estimate in result.contracts:
         rows.append(
             {
-                "Question": contract.question,
-                "Direction": contract.direction.value,
-                "Strike": contract.strike_usd,
+                "Event time": contract.expires_at,
+                "Event": contract.question.split(" · ", 1)[0],
+                "Price range": f"${contract.strike_usd:,.0f}–${contract.cap_strike_usd:,.2f}",
+                "Range floor": contract.strike_usd,
                 "Range cap": contract.cap_strike_usd,
-                "Expiry": contract.expires_at,
                 "YES ask": estimate.executable_price,
                 "Ask size": contract.yes_ask_size,
                 "Modeled probability": estimate.probability,
@@ -97,14 +103,38 @@ else:
                 "Edge after fee": estimate.edge_after_fee,
             }
         )
-    frame = pd.DataFrame(rows).sort_values("Edge after fee", ascending=False)
-    rows_to_show = st.slider("Contracts to display", 10, 100, 30, 10)
+    frame = pd.DataFrame(rows)
+    event_options = sorted(frame["Event time"].drop_duplicates())
+    event_labels = {
+        timestamp.strftime("%a, %b %d · %H:%M UTC"): timestamp
+        for timestamp in event_options
+    }
+    selected_event_label = st.selectbox(
+        "Choose a BTC event",
+        list(event_labels),
+        help="Each event is one settlement date/time containing many mutually exclusive price buckets.",
+    )
+    selected_event_time = event_labels[selected_event_label]
+    event_frame = frame[frame["Event time"] == selected_event_time].sort_values("Range floor")
+    summary_cols = st.columns(3)
+    summary_cols[0].metric("Settlement time", selected_event_time.strftime("%b %d · %H:%M UTC"))
+    summary_cols[1].metric("Price buckets", len(event_frame))
+    positive_edges = int((event_frame["Edge after fee"] > 0).sum())
+    summary_cols[2].metric("Positive model gaps", positive_edges)
     st.dataframe(
-        frame.head(rows_to_show).style.format(
+        event_frame[
+            [
+                "Price range",
+                "YES ask",
+                "Ask size",
+                "Modeled probability",
+                "Raw edge",
+                "Edge after fee",
+            ]
+        ].style.format(
             {
-                "Strike": "${:,.0f}",
-                "Range cap": "${:,.0f}",
                 "YES ask": "{:.1%}",
+                "Ask size": "{:,.0f}",
                 "Modeled probability": "{:.1%}",
                 "Raw edge": "{:+.1%}",
                 "Edge after fee": "{:+.1%}",
@@ -114,7 +144,11 @@ else:
         hide_index=True,
     )
     ranked_contracts = sorted(
-        result.contracts,
+        [
+            item
+            for item in result.contracts
+            if item[0].expires_at == selected_event_time
+        ],
         key=lambda item: item[1].edge_after_fee
         if item[1].edge_after_fee is not None
         else float("-inf"),
@@ -122,7 +156,7 @@ else:
     )
     st.subheader("Contract inspector")
     st.caption(
-        "Verify what a selected contract actually settles on before trusting its model score."
+        "Select one price bucket from this event and verify what its YES contract settles on."
     )
     contract_labels = {
         (
@@ -130,7 +164,7 @@ else:
             f"${contract.strike_usd:,.0f}–${contract.cap_strike_usd:,.2f} · "
             f"YES {contract.best_ask:.0%}"
         ): (contract, estimate)
-        for contract, estimate in ranked_contracts[:50]
+        for contract, estimate in ranked_contracts
         if contract.cap_strike_usd is not None and contract.best_ask is not None
     }
     selected_label = st.selectbox("Inspect a contract", list(contract_labels))
