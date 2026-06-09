@@ -3,13 +3,33 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from polyscanner.agents import (
+    ContractAgent,
+    MarketQualityAgent,
+    QuantAgent,
+    SettlementAgent,
+    SkepticAgent,
+)
+from polyscanner.orchestrator import OpportunityOrchestrator
 from polyscanner.providers import CoinbasePublicClient, KalshiPublicClient
 from polyscanner.scanner import run_scan
 from polyscanner.storage import SnapshotStore
 
-st.set_page_config(page_title="Kalshi BTC Probability Scanner", page_icon="◎", layout="wide")
-st.title("BTC Probability Scanner")
-st.caption("Read-only Kalshi research · next 14 days · no orders · no trading credentials")
+st.set_page_config(page_title="Kalshi BTC Agent Control Room", page_icon="◎", layout="wide")
+st.title("Kalshi BTC Agent Control Room")
+st.caption("Live opportunities · agent review · percentage sizing · paper decisions only")
+
+with st.sidebar:
+    st.subheader("Paper account")
+    paper_equity = st.number_input(
+        "Account equity",
+        min_value=100.0,
+        value=1_000.0,
+        step=100.0,
+        help="Position sizes are percentages of this paper balance.",
+    )
+    st.caption("Standard 5% · Strong 7.5% · Exceptional 10%")
+    st.warning("Live order placement is not enabled.")
 
 
 @st.cache_resource
@@ -53,7 +73,6 @@ cols[2].metric(
 )
 st.caption(f"Last scan: {result.scanned_at:%Y-%m-%d %H:%M:%S UTC}")
 
-st.subheader("1. Kalshi BTC market discovery")
 discovery = pd.DataFrame(
     [
         {
@@ -73,14 +92,15 @@ discovery = pd.DataFrame(
         },
     ]
 )
-st.dataframe(discovery, width="stretch", hide_index=True)
+with st.expander("Developer diagnostics: Kalshi feed coverage"):
+    st.dataframe(discovery, width="stretch", hide_index=True)
 
 if not result.contracts:
     st.warning(
         "No active Kalshi KXBTC price-range contract closing within 14 days was available."
     )
 else:
-    st.subheader("2. Dated BTC events and their price-range contracts")
+    st.subheader("Available Bitcoin bets")
     st.write(
         "A **Kalshi event** is the dated question, such as “BTC price range on June 9 at "
         "5 PM EDT.” A **contract** is one YES/NO price bucket inside that event, such as "
@@ -164,7 +184,7 @@ else:
         else float("-inf"),
         reverse=True,
     )
-    st.subheader("Contract inspector")
+    st.subheader("Selected bet")
     st.caption(
         "Select one price bucket from this event and verify what its YES contract settles on."
     )
@@ -208,37 +228,47 @@ else:
             f"Ask size: {selected_contract.yes_ask_size}"
         )
 
-st.subheader("2. Coinbase price and volatility input")
-st.write(
-    f"The scanner observed BTC at **${result.spot_usd:,.2f}**. It downloaded the latest "
-    "24 hours of five-minute Coinbase candles, calculated each interval’s logarithmic return, "
-    f"measured their sample standard deviation, and annualized it with √(365×24×12). The result is "
-    f"**{result.annualized_volatility:.1%}**."
-)
-st.code(
-    "5-minute return = ln(current close / prior close)\n"
-    "annualized realized volatility = std(5-minute returns) × √(365 × 24 × 12)",
-    language="text",
-)
-
-st.subheader("3. Threshold and expiry parsing")
-st.write(
-    "For each Kalshi KXBTC market, the parser extracts its lower and upper USD bounds, "
-    "close time, executable YES bid/ask, displayed ask size, and settlement rules. "
-    "Current hourly markets settle from the average of sixty CF Benchmarks BRTI readings "
-    "immediately before the stated close."
-)
-
-st.subheader("4. Fee-aware probability comparison")
-if result.contracts:
-    st.write(
-        "The table above compares the modeled probability of BTC landing inside each price "
-        "range with the executable YES ask. "
-        "Raw edge is modeled probability minus ask; edge after fee also deducts the market’s "
-        "standard quadratic taker-fee estimate before order-level rounding."
+    st.subheader("Agent decision")
+    orchestrator = OpportunityOrchestrator(
+        [
+            ContractAgent(),
+            QuantAgent(),
+            MarketQualityAgent(),
+            SettlementAgent(),
+            SkepticAgent(),
+        ]
     )
-else:
-    st.info("No probability comparison can be calculated until a parseable Kalshi BTC contract exists.")
+    decision = orchestrator.decide(
+        selected_contract,
+        selected_estimate,
+        equity=paper_equity,
+    )
+    decision_cols = st.columns(3)
+    decision_cols[0].metric("Decision", decision.action)
+    decision_cols[1].metric("Paper allocation", f"{decision.allocation_pct:.1%}")
+    decision_cols[2].metric("Paper stake", f"${decision.stake_usd:,.2f}")
+    for opinion in decision.opinions:
+        status = {
+            "support": "PASS",
+            "watch": "CAUTION",
+            "veto": "VETO",
+        }[opinion.verdict.value]
+        st.markdown(f"**{opinion.agent} · {status}** — {opinion.summary}")
+        st.caption(" | ".join(opinion.evidence))
+    st.caption("This is a structured paper decision. No Kalshi order is created.")
+
+with st.expander("How the BTC probability input is calculated"):
+    st.write(
+        f"The scanner observed BTC at **${result.spot_usd:,.2f}**. It downloaded the latest "
+        "24 hours of five-minute Coinbase candles, calculated each interval’s logarithmic return, "
+        f"measured their sample standard deviation, and annualized it with √(365×24×12). The result is "
+        f"**{result.annualized_volatility:.1%}**."
+    )
+    st.code(
+        "5-minute return = ln(current close / prior close)\n"
+        "annualized realized volatility = std(5-minute returns) × √(365 × 24 × 12)",
+        language="text",
+    )
 
 with st.expander("Probability model and limitations"):
     st.write(
@@ -248,22 +278,14 @@ with st.expander("Probability model and limitations"):
         "A positive modeled edge is not a recommendation and does not prove an executable advantage."
     )
 
-st.subheader("5. SQLite recording")
-st.write(
-    "Every live scan is stored locally in `data/scanner.db`, including scans that find zero "
-    "contracts. Contract-level estimates are stored separately when contracts exist."
-)
-scan_history = store().recent_scans()
-if scan_history:
-    st.caption("Recent catalog scans")
-    st.dataframe(pd.DataFrame(scan_history), width="stretch", hide_index=True)
+with st.expander("Recorded scanner history"):
+    scan_history = store().recent_scans()
+    if scan_history:
+        st.caption("Recent catalog scans")
+        st.dataframe(pd.DataFrame(scan_history), width="stretch", hide_index=True)
+    history = store().recent_estimates()
+    if history:
+        st.caption("Recent contract estimates")
+        st.dataframe(pd.DataFrame(history), width="stretch", hide_index=True)
 
-history = store().recent_estimates()
-if history:
-    st.caption("Recent contract estimates")
-    st.dataframe(pd.DataFrame(history), width="stretch", hide_index=True)
-else:
-    st.caption("No contract estimates recorded yet because no usable US BTC contract has been found.")
-
-st.subheader("6. Safety boundary")
-st.success("Read-only: no Kalshi credentials, no order placement, and no account access.")
+st.success("Current safety boundary: live data, paper decisions, no Kalshi account access or orders.")
