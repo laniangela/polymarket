@@ -26,6 +26,9 @@ class ThresholdContract:
     yes_ask_size: float | None = None
     rules: str = ""
     venue: str = "Kalshi"
+    event_ticker: str = ""
+    event_title: str = ""
+    event_subtitle: str = ""
 
 
 @dataclass(frozen=True)

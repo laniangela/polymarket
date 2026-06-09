@@ -57,6 +57,9 @@ def parse_threshold_contract(payload: dict[str, Any]) -> ThresholdContract | Non
                     [str(payload.get("rules_primary", "")), str(payload.get("rules_secondary", ""))],
                 )
             ),
+            event_ticker=str(payload.get("event_ticker", "")),
+            event_title=str(payload.get("_event_title", payload.get("title", ""))),
+            event_subtitle=str(payload.get("_event_subtitle", "")),
         )
     if not is_bitcoin_market(payload):
         return None

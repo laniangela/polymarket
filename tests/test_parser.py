@@ -32,6 +32,9 @@ def test_parser_extracts_kalshi_range_and_rules():
     contract = parse_threshold_contract(
         {
             "ticker": "KXBTC-26JUN0917-B63625",
+            "event_ticker": "KXBTC-26JUN0917",
+            "_event_title": "BTC price range on Jun 9, 2026 at 5pm EDT?",
+            "_event_subtitle": "On Jun 9, 2026 at 5pm EDT",
             "title": "Bitcoin price range on Jun 9, 2026?",
             "subtitle": "$63,500 to 63,749.99",
             "strike_type": "between",
@@ -49,3 +52,5 @@ def test_parser_extracts_kalshi_range_and_rules():
     assert contract.cap_strike_usd == 63749.99
     assert contract.yes_ask_size == 490
     assert contract.rules == "BRTI average must be in range."
+    assert contract.event_ticker == "KXBTC-26JUN0917"
+    assert contract.event_title == "BTC price range on Jun 9, 2026 at 5pm EDT?"

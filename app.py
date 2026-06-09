@@ -91,8 +91,10 @@ else:
     for contract, estimate in result.contracts:
         rows.append(
             {
+                "Event ticker": contract.event_ticker,
                 "Event time": contract.expires_at,
-                "Event": contract.question.split(" · ", 1)[0],
+                "Event": contract.event_title,
+                "Event subtitle": contract.event_subtitle,
                 "Price range": f"${contract.strike_usd:,.0f}–${contract.cap_strike_usd:,.2f}",
                 "Range floor": contract.strike_usd,
                 "Range cap": contract.cap_strike_usd,
@@ -104,18 +106,26 @@ else:
             }
         )
     frame = pd.DataFrame(rows)
-    event_options = sorted(frame["Event time"].drop_duplicates())
+    events = (
+        frame[["Event ticker", "Event", "Event subtitle", "Event time"]]
+        .drop_duplicates("Event ticker")
+        .sort_values("Event time")
+    )
     event_labels = {
-        timestamp.strftime("%a, %b %d · %H:%M UTC"): timestamp
-        for timestamp in event_options
+        f"{row['Event subtitle']} · {row['Event ticker']}": row["Event ticker"]
+        for _, row in events.iterrows()
     }
     selected_event_label = st.selectbox(
         "Choose a BTC event",
         list(event_labels),
         help="Each event is one settlement date/time containing many mutually exclusive price buckets.",
     )
-    selected_event_time = event_labels[selected_event_label]
-    event_frame = frame[frame["Event time"] == selected_event_time].sort_values("Range floor")
+    selected_event_ticker = event_labels[selected_event_label]
+    event_frame = frame[frame["Event ticker"] == selected_event_ticker].sort_values("Range floor")
+    selected_event_time = event_frame["Event time"].iloc[0]
+    selected_event_title = event_frame["Event"].iloc[0]
+    st.markdown(f"### {selected_event_title}")
+    st.caption(f"Kalshi event: `{selected_event_ticker}`")
     summary_cols = st.columns(3)
     summary_cols[0].metric("Settlement time", selected_event_time.strftime("%b %d · %H:%M UTC"))
     summary_cols[1].metric("Price buckets", len(event_frame))
@@ -147,7 +157,7 @@ else:
         [
             item
             for item in result.contracts
-            if item[0].expires_at == selected_event_time
+            if item[0].event_ticker == selected_event_ticker
         ],
         key=lambda item: item[1].edge_after_fee
         if item[1].edge_after_fee is not None

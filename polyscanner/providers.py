@@ -37,7 +37,10 @@ class KalshiPublicClient:
                 timeout=self.timeout,
             )
             market_response.raise_for_status()
-            markets.extend(market_response.json().get("markets", []))
+            for market in market_response.json().get("markets", []):
+                market["_event_title"] = event.get("title", "")
+                market["_event_subtitle"] = event.get("sub_title", "")
+                markets.append(market)
         return markets
 
     def market_book(self, slug: str) -> dict[str, Any]:

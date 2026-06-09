@@ -21,7 +21,7 @@ class SnapshotStore:
                 "question TEXT, direction TEXT, strike_usd REAL, expires_at TEXT, spot_usd REAL, "
                 "annualized_volatility REAL, modeled_probability REAL, executable_price REAL, "
                 "raw_edge REAL, edge_after_fee REAL, cap_strike_usd REAL, yes_ask_size REAL, "
-                "rules TEXT, venue TEXT)"
+                "rules TEXT, venue TEXT, event_ticker TEXT, event_title TEXT, event_subtitle TEXT)"
             )
             existing = {
                 row[1] for row in connection.execute("PRAGMA table_info(estimates)").fetchall()
@@ -31,6 +31,9 @@ class SnapshotStore:
                 "yes_ask_size": "REAL",
                 "rules": "TEXT",
                 "venue": "TEXT",
+                "event_ticker": "TEXT",
+                "event_title": "TEXT",
+                "event_subtitle": "TEXT",
             }.items():
                 if column not in existing:
                     connection.execute(f"ALTER TABLE estimates ADD COLUMN {column} {column_type}")
@@ -51,8 +54,9 @@ class SnapshotStore:
                 "INSERT INTO estimates("
                 "calculated_at, market_id, slug, question, direction, strike_usd, expires_at, "
                 "spot_usd, annualized_volatility, modeled_probability, executable_price, "
-                "raw_edge, edge_after_fee, cap_strike_usd, yes_ask_size, rules, venue"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "raw_edge, edge_after_fee, cap_strike_usd, yes_ask_size, rules, venue, "
+                "event_ticker, event_title, event_subtitle"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     estimate.calculated_at.isoformat(),
                     contract.market_id,
@@ -71,6 +75,9 @@ class SnapshotStore:
                     contract.yes_ask_size,
                     contract.rules,
                     contract.venue,
+                    contract.event_ticker,
+                    contract.event_title,
+                    contract.event_subtitle,
                 ),
             )
 
