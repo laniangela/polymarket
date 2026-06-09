@@ -20,8 +20,20 @@ class SnapshotStore:
                 "id INTEGER PRIMARY KEY, calculated_at TEXT NOT NULL, market_id TEXT, slug TEXT, "
                 "question TEXT, direction TEXT, strike_usd REAL, expires_at TEXT, spot_usd REAL, "
                 "annualized_volatility REAL, modeled_probability REAL, executable_price REAL, "
-                "raw_edge REAL, edge_after_fee REAL)"
+                "raw_edge REAL, edge_after_fee REAL, cap_strike_usd REAL, yes_ask_size REAL, "
+                "rules TEXT, venue TEXT)"
             )
+            existing = {
+                row[1] for row in connection.execute("PRAGMA table_info(estimates)").fetchall()
+            }
+            for column, column_type in {
+                "cap_strike_usd": "REAL",
+                "yes_ask_size": "REAL",
+                "rules": "TEXT",
+                "venue": "TEXT",
+            }.items():
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE estimates ADD COLUMN {column} {column_type}")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -39,8 +51,8 @@ class SnapshotStore:
                 "INSERT INTO estimates("
                 "calculated_at, market_id, slug, question, direction, strike_usd, expires_at, "
                 "spot_usd, annualized_volatility, modeled_probability, executable_price, "
-                "raw_edge, edge_after_fee"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "raw_edge, edge_after_fee, cap_strike_usd, yes_ask_size, rules, venue"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     estimate.calculated_at.isoformat(),
                     contract.market_id,
@@ -55,6 +67,10 @@ class SnapshotStore:
                     estimate.executable_price,
                     estimate.raw_edge,
                     estimate.edge_after_fee,
+                    contract.cap_strike_usd,
+                    contract.yes_ask_size,
+                    contract.rules,
+                    contract.venue,
                 ),
             )
 

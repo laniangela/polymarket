@@ -16,6 +16,7 @@ def test_storage_records_estimate(tmp_path):
     rows = store.recent_estimates()
     assert len(rows) == 1
     assert rows[0]["slug"] == "btc-64k"
+    assert rows[0]["venue"] == "Kalshi"
 
 
 def test_storage_records_zero_market_scan(tmp_path):

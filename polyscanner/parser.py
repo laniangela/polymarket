@@ -32,6 +32,32 @@ def is_bitcoin_market(payload: dict[str, Any]) -> bool:
 
 
 def parse_threshold_contract(payload: dict[str, Any]) -> ThresholdContract | None:
+    if str(payload.get("ticker", "")).startswith("KXBTC"):
+        floor = payload.get("floor_strike")
+        cap = payload.get("cap_strike")
+        expiry_raw = payload.get("close_time")
+        if payload.get("strike_type") != "between" or floor is None or cap is None or not expiry_raw:
+            return None
+        expires_at = datetime.fromisoformat(str(expiry_raw).replace("Z", "+00:00"))
+        return ThresholdContract(
+            market_id=str(payload.get("ticker", "")),
+            slug=str(payload.get("ticker", "")),
+            question=f"{payload.get('title', '')} · {payload.get('subtitle', '')}",
+            strike_usd=float(floor),
+            cap_strike_usd=float(cap),
+            direction=Direction.BETWEEN,
+            expires_at=expires_at,
+            best_bid=_amount(payload.get("yes_bid_dollars")),
+            best_ask=_amount(payload.get("yes_ask_dollars")),
+            yes_ask_size=_amount(payload.get("yes_ask_size_fp")),
+            fee_coefficient=0.07,
+            rules=" ".join(
+                filter(
+                    None,
+                    [str(payload.get("rules_primary", "")), str(payload.get("rules_secondary", ""))],
+                )
+            ),
+        )
     if not is_bitcoin_market(payload):
         return None
     question = str(payload.get("question") or payload.get("title") or "")

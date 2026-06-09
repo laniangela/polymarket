@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from polyscanner.models import ProbabilityEstimate, ThresholdContract
-from polyscanner.parser import is_bitcoin_market, parse_threshold_contract
+from polyscanner.parser import parse_threshold_contract
 from polyscanner.probability import annualized_realized_volatility, estimate_contract
-from polyscanner.providers import CoinbasePublicClient, PolymarketUSPublicClient
+from polyscanner.providers import CoinbasePublicClient, KalshiPublicClient
 from polyscanner.storage import SnapshotStore
 
 
@@ -22,15 +22,17 @@ class ScanResult:
 
 
 def run_scan(
-    polymarket: PolymarketUSPublicClient,
+    kalshi: KalshiPublicClient,
     coinbase: CoinbasePublicClient,
     store: SnapshotStore,
 ) -> ScanResult:
     scanned_at = datetime.now(timezone.utc)
     spot = coinbase.spot_price()
-    volatility = annualized_realized_volatility(coinbase.daily_closes())
-    catalog_payloads = polymarket.active_crypto_markets()
-    bitcoin_payloads = [payload for payload in catalog_payloads if is_bitcoin_market(payload)]
+    volatility = annualized_realized_volatility(
+        coinbase.intraday_closes(hours=24, granularity=300),
+        periods_per_year=365 * 24 * 12,
+    )
+    bitcoin_payloads = kalshi.active_bitcoin_markets(days=14)
     parsed = [
         contract
         for payload in bitcoin_payloads
@@ -45,7 +47,7 @@ def run_scan(
         volatility,
         estimates,
         scanned_at,
-        catalog_markets=len(catalog_payloads),
+        catalog_markets=len(bitcoin_payloads),
         bitcoin_markets=len(bitcoin_payloads),
         threshold_contracts=len(parsed),
     )

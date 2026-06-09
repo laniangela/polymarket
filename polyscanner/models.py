@@ -8,6 +8,7 @@ from enum import StrEnum
 class Direction(StrEnum):
     ABOVE = "above"
     BELOW = "below"
+    BETWEEN = "between"
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,10 @@ class ThresholdContract:
     best_bid: float | None
     best_ask: float | None
     fee_coefficient: float
+    cap_strike_usd: float | None = None
+    yes_ask_size: float | None = None
+    rules: str = ""
+    venue: str = "Kalshi"
 
 
 @dataclass(frozen=True)

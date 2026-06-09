@@ -23,6 +23,13 @@ def test_above_and_below_are_complements():
     assert above + below == pytest.approx(1)
 
 
+def test_between_probability_is_bounded():
+    probability = threshold_probability(
+        63_700, 63_500, 0.60, 3600, Direction.BETWEEN, cap_strike_usd=63_750
+    )
+    assert 0 < probability < 1
+
+
 def test_realized_volatility_is_positive():
     closes = pd.Series([100, 101, 99, 103, 102], dtype=float)
     assert annualized_realized_volatility(closes) > 0

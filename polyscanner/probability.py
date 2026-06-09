@@ -24,6 +24,7 @@ def threshold_probability(
     annualized_volatility: float,
     seconds_to_expiry: float,
     direction: Direction,
+    cap_strike_usd: float | None = None,
 ) -> float:
     if spot_usd <= 0 or strike_usd <= 0:
         raise ValueError("Spot and strike must be positive.")
@@ -36,6 +37,14 @@ def threshold_probability(
     sigma_t = annualized_volatility * math.sqrt(time_years)
     z = (math.log(strike_usd / spot_usd) + 0.5 * annualized_volatility**2 * time_years) / sigma_t
     above = 1.0 - _normal_cdf(z)
+    if direction == Direction.BETWEEN:
+        if cap_strike_usd is None or cap_strike_usd <= strike_usd:
+            raise ValueError("Between contracts require a cap above the floor.")
+        cap_z = (
+            math.log(cap_strike_usd / spot_usd)
+            + 0.5 * annualized_volatility**2 * time_years
+        ) / sigma_t
+        return max(0.0, _normal_cdf(cap_z) - _normal_cdf(z))
     return above if direction == Direction.ABOVE else 1.0 - above
 
 
@@ -52,6 +61,7 @@ def estimate_contract(
         annualized_volatility,
         (contract.expires_at - now).total_seconds(),
         contract.direction,
+        contract.cap_strike_usd,
     )
     executable = contract.best_ask
     raw_edge = probability - executable if executable is not None else None
