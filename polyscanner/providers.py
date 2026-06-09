@@ -6,6 +6,9 @@ from typing import Any
 import pandas as pd
 import requests
 
+from polyscanner.auth import KalshiRequestSigner
+
+
 class KalshiPublicClient:
     BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 
@@ -46,6 +49,36 @@ class KalshiPublicClient:
     def market_book(self, slug: str) -> dict[str, Any]:
         response = requests.get(
             f"{self.BASE_URL}/markets/{slug}/orderbook",
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+class KalshiAccountClient:
+    BASE_URL = KalshiPublicClient.BASE_URL
+    API_PATH = "/trade-api/v2"
+
+    def __init__(self, signer: KalshiRequestSigner, timeout: int = 20) -> None:
+        self.signer = signer
+        self.timeout = timeout
+
+    def balance(self) -> dict[str, Any]:
+        return self._get("/portfolio/balance")
+
+    def positions(self, limit: int = 200) -> dict[str, Any]:
+        return self._get("/portfolio/positions", params={"limit": limit})
+
+    def _get(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        path = f"{self.API_PATH}{endpoint}"
+        response = requests.get(
+            f"{self.BASE_URL}{endpoint}",
+            params=params,
+            headers=self.signer.headers("GET", path),
             timeout=self.timeout,
         )
         response.raise_for_status()

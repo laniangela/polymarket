@@ -1,23 +1,8 @@
-# Kalshi BTC Probability Scanner
+# Kalshi BTC Agent Control Room
 
-Read-only research software that compares Kalshi Bitcoin price-range contracts
-closing within 14 days with a probability estimate derived from Coinbase
-BTC-USD spot, realized volatility, and time to expiry.
-
-The first milestone does not place orders and does not require trading
-credentials. It records public market snapshots and model outputs to SQLite.
-
-## What it measures
-
-For a contract such as “Will Bitcoin be between $63,500 and $63,749.99 at 5 PM ET?”:
-
-```text
-estimated edge = modeled probability - executable YES ask
-```
-
-The modeled probability is a deliberately simple lognormal estimate using
-recent realized volatility. It is a benchmark, not a guarantee or trading
-recommendation.
+A focused, PolyTerm-style Kalshi monitor for BTC price-range markets. It discovers the next 14 days
+of `KXBTC` events, estimates probabilities, ranks executable gaps, runs structured specialist
+agents, and sizes paper opportunities as a percentage of account equity.
 
 ## Run
 
@@ -25,22 +10,45 @@ recommendation.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-streamlit run app.py
+streamlit run app.py --server.port 8502
 ```
 
-Kalshi's public market and order-book REST endpoints do not require an API key.
-The scanner discovers open `KXBTC` events and retains those closing within the
-next 14 days.
+Public Kalshi and Coinbase data work without credentials.
+
+## Optional read-only Kalshi connection
+
+Create a Kalshi API key, keep the downloaded RSA private key outside the repository, then copy
+`.env.example` to `.env` and set:
+
+```text
+KALSHI_ACCESS_KEY_ID=your-key-id
+KALSHI_PRIVATE_KEY_PATH=/absolute/path/to/your-private-key.pem
+```
+
+The dashboard can then test account balance access and read the live CF Benchmarks BRTI feed used
+by Kalshi settlement. It does not contain an order-placement method.
+
+## Current agents
+
+- Contract interpreter: validates event, range, expiry, and settlement rules.
+- Quant: compares modeled probability with the executable YES ask after estimated fees.
+- Market quality: checks displayed spread and ask size.
+- Settlement risk: highlights Coinbase-to-BRTI basis risk.
+- Skeptic: challenges contracts near settlement boundaries.
+
+Paper sizing uses 5%, 7.5%, and 10% tiers, at most one selected range per event, and a 25% total
+exposure ceiling. Estimates and scans are recorded locally in SQLite for later replay and testing.
 
 ## Safety boundary
 
-- Read-only
-- No Kalshi API secrets
+- Public market data by default
+- Optional authenticated account balance and BRTI reads
+- No private key contents stored in the repository
 - No order placement
 - No autonomous trading
-- No synthetic replacement for unavailable US markets
 
 Sources:
 
-- Kalshi public API: `https://external-api.kalshi.com/trade-api/v2`
+- Kalshi API: `https://external-api.kalshi.com/trade-api/v2`
+- Kalshi WebSocket: `wss://api.elections.kalshi.com/trade-api/ws/v2`
 - Coinbase Exchange public candles and ticker APIs

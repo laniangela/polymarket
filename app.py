@@ -3,21 +3,37 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from polyscanner.agents import (
-    ContractAgent,
-    MarketQualityAgent,
-    QuantAgent,
-    SettlementAgent,
-    SkepticAgent,
+from polyscanner.auth import KalshiCredentials, KalshiRequestSigner
+from polyscanner.live import KalshiLiveClient
+from polyscanner.opportunities import default_orchestrator, rank_opportunities
+from polyscanner.providers import (
+    CoinbasePublicClient,
+    KalshiAccountClient,
+    KalshiPublicClient,
 )
-from polyscanner.orchestrator import OpportunityOrchestrator
-from polyscanner.providers import CoinbasePublicClient, KalshiPublicClient
 from polyscanner.scanner import run_scan
 from polyscanner.storage import SnapshotStore
 
 st.set_page_config(page_title="Kalshi BTC Agent Control Room", page_icon="◎", layout="wide")
 st.title("Kalshi BTC Agent Control Room")
-st.caption("Live opportunities · agent review · percentage sizing · paper decisions only")
+st.caption("Ranked BTC opportunities · agent review · percentage sizing · paper decisions")
+
+st.markdown(
+    """
+    <style>
+    .stApp { background: #f4f1ea; color: #28312f; }
+    [data-testid="stSidebar"] { background: #e8e5dc; }
+    [data-testid="stMetric"] {
+        background: #fbfaf6;
+        border: 1px solid #d8d3c7;
+        border-radius: 8px;
+        padding: 0.8rem;
+    }
+    div[data-testid="stDataFrame"] { border: 1px solid #d8d3c7; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.subheader("Paper account")
@@ -29,7 +45,30 @@ with st.sidebar:
         help="Position sizes are percentages of this paper balance.",
     )
     st.caption("Standard 5% · Strong 7.5% · Exceptional 10%")
-    st.warning("Live order placement is not enabled.")
+    st.divider()
+    st.subheader("Kalshi connection")
+    credentials = KalshiCredentials.from_env()
+    if credentials is None:
+        st.caption("Public market data connected")
+        st.info("Add the two Kalshi values from `.env.example` to enable BRTI and account reads.")
+    else:
+        st.caption("API credentials found")
+        if st.button("Test account + BRTI"):
+            try:
+                signer = KalshiRequestSigner(credentials)
+                st.session_state.kalshi_balance = KalshiAccountClient(signer).balance()
+                st.session_state.brti = KalshiLiveClient(signer).latest_brti()
+            except Exception as error:
+                st.error(f"Kalshi connection failed: {error}")
+        balance_payload = st.session_state.get("kalshi_balance")
+        if balance_payload:
+            balance_cents = float(balance_payload.get("balance", 0))
+            st.metric("Kalshi cash balance", f"${balance_cents / 100:,.2f}")
+        brti = st.session_state.get("brti")
+        if brti:
+            st.metric("Live BRTI", f"${brti.value:,.2f}")
+            st.caption(f"Received {brti.received_at:%H:%M:%S UTC}")
+    st.warning("Order placement is not implemented or enabled.")
 
 
 @st.cache_resource
@@ -49,7 +88,11 @@ if scan_clicked or "scan_result" not in st.session_state:
         st.stop()
 
 result = st.session_state.scan_result
-cols = st.columns(3)
+ranked = rank_opportunities(result.contracts, paper_equity)
+paper_trades = [item for item in ranked if item.decision.action == "PAPER TRADE"]
+watch_items = [item for item in ranked if item.decision.action == "WATCH"]
+
+cols = st.columns(4)
 cols[0].metric(
     "Coinbase BTC spot",
     f"${result.spot_usd:,.2f}",
@@ -65,13 +108,78 @@ cols[1].metric(
     ),
 )
 cols[2].metric(
-    "BTC price contracts found",
+    "BTC contracts",
     len(result.contracts),
     help=(
         "Open Kalshi KXBTC price-range contracts closing within the next 14 days."
     ),
 )
+cols[3].metric(
+    "Paper selections",
+    len(paper_trades),
+    help="Contracts that pass all agent checks and fit the portfolio exposure rules.",
+)
 st.caption(f"Last scan: {result.scanned_at:%Y-%m-%d %H:%M:%S UTC}")
+
+st.subheader("Best opportunities now")
+st.write(
+    "Every live BTC price bucket is reviewed automatically. The table ranks modeled gaps after "
+    "estimated fees, applies agent vetoes, selects at most one bucket per settlement event, and "
+    "stops allocating when the 25% paper exposure ceiling is reached."
+)
+feed_rows = []
+for item in ranked[:20]:
+    contract = item.contract
+    estimate = item.estimate
+    feed_rows.append(
+        {
+            "Rank": item.rank,
+            "Decision": item.decision.action,
+            "Settlement": contract.expires_at,
+            "Price range": f"${contract.strike_usd:,.0f}–${contract.cap_strike_usd:,.2f}",
+            "YES ask": estimate.executable_price,
+            "Model": estimate.probability,
+            "After-fee gap": estimate.edge_after_fee,
+            "Paper stake": item.decision.stake_usd,
+            "Event": contract.event_ticker,
+        }
+    )
+feed_frame = pd.DataFrame(
+    feed_rows,
+    columns=[
+        "Rank",
+        "Decision",
+        "Settlement",
+        "Price range",
+        "YES ask",
+        "Model",
+        "After-fee gap",
+        "Paper stake",
+        "Event",
+    ],
+)
+st.dataframe(
+    feed_frame.style.format(
+        {
+            "YES ask": "{:.1%}",
+            "Model": "{:.1%}",
+            "After-fee gap": "{:+.1%}",
+            "Paper stake": "${:,.2f}",
+        }
+    ),
+    width="stretch",
+    hide_index=True,
+)
+if paper_trades:
+    total_stake = sum(item.decision.stake_usd for item in paper_trades)
+    st.success(
+        f"{len(paper_trades)} paper selection(s), reserving ${total_stake:,.2f} "
+        f"({total_stake / paper_equity:.1%}) of the paper account."
+    )
+elif watch_items:
+    st.info("No contract currently clears the strong-trade threshold. The closest candidates remain on watch.")
+else:
+    st.info("No current BTC contract passes the model and market-quality checks.")
 
 discovery = pd.DataFrame(
     [
@@ -135,9 +243,21 @@ else:
         f"{row['Event subtitle']} · {row['Event ticker']}": row["Event ticker"]
         for _, row in events.iterrows()
     }
+    focus_item = paper_trades[0] if paper_trades else ranked[0]
+    focus_event = focus_item.contract.event_ticker
+    event_options = list(event_labels)
+    default_event_index = next(
+        (
+            index
+            for index, label in enumerate(event_options)
+            if event_labels[label] == focus_event
+        ),
+        0,
+    )
     selected_event_label = st.selectbox(
         "Choose a BTC event",
-        list(event_labels),
+        event_options,
+        index=default_event_index,
         help="Each event is one settlement date/time containing many mutually exclusive price buckets.",
     )
     selected_event_ticker = event_labels[selected_event_label]
@@ -229,15 +349,7 @@ else:
         )
 
     st.subheader("Agent decision")
-    orchestrator = OpportunityOrchestrator(
-        [
-            ContractAgent(),
-            QuantAgent(),
-            MarketQualityAgent(),
-            SettlementAgent(),
-            SkepticAgent(),
-        ]
-    )
+    orchestrator = default_orchestrator()
     decision = orchestrator.decide(
         selected_contract,
         selected_estimate,
@@ -288,4 +400,7 @@ with st.expander("Recorded scanner history"):
         st.caption("Recent contract estimates")
         st.dataframe(pd.DataFrame(history), width="stretch", hide_index=True)
 
-st.success("Current safety boundary: live data, paper decisions, no Kalshi account access or orders.")
+st.success(
+    "Current safety boundary: public market data, optional read-only Kalshi account/BRTI access, "
+    "paper decisions, and no order placement."
+)
