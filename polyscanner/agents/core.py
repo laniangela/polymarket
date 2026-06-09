@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from polyscanner.models import ProbabilityEstimate, ThresholdContract
+from polyscanner.features import MicrostructureFeatureEngine, MicrostructureFeatures
 
 
 class Verdict(StrEnum):
@@ -120,6 +121,67 @@ class MarketQualityAgent:
         )
 
 
+class MicrostructureAgent:
+    name = "Microstructure"
+
+    def __init__(self, features: MicrostructureFeatureEngine) -> None:
+        self.features = features
+
+    def evaluate(
+        self,
+        contract: ThresholdContract,
+        _: ProbabilityEstimate,
+    ) -> AgentOpinion:
+        feature = self.features.calculate(contract.market_id)
+        if feature.latest_observation_at is None:
+            return AgentOpinion(
+                self.name,
+                Verdict.VETO,
+                0,
+                "No recorded order-book evidence for this contract.",
+                ("The recorder must track a contract before it is eligible.",),
+            )
+        if feature.freshness_seconds is None or feature.freshness_seconds > 30:
+            return AgentOpinion(
+                self.name,
+                Verdict.VETO,
+                0,
+                "Recorded order-book evidence is stale.",
+                (f"Quote age: {feature.freshness_seconds:.0f}s",),
+            )
+        if feature.quote_observations < 3:
+            return AgentOpinion(
+                self.name,
+                Verdict.WATCH,
+                0.25,
+                "Too little history for a lag conclusion.",
+                (f"Usable quote observations: {feature.quote_observations}",),
+            )
+        if feature.spread is not None and feature.spread > 0.05:
+            return AgentOpinion(
+                self.name,
+                Verdict.WATCH,
+                max(0, 1 - feature.spread),
+                "Live recorded spread is wide.",
+                _microstructure_evidence(feature),
+            )
+        if feature.repricing_delay_seconds is not None and feature.repricing_delay_seconds >= 10:
+            return AgentOpinion(
+                self.name,
+                Verdict.SUPPORT,
+                min(1, feature.repricing_delay_seconds / 30),
+                "Recorded BTC movement preceded Kalshi repricing.",
+                _microstructure_evidence(feature),
+            )
+        return AgentOpinion(
+            self.name,
+            Verdict.WATCH,
+            0.5,
+            "Feed is usable, but no material lag is established yet.",
+            _microstructure_evidence(feature),
+        )
+
+
 class SettlementAgent:
     name = "Settlement risk"
 
@@ -160,3 +222,21 @@ class SkepticAgent:
             "No immediate boundary-specific objection found.",
             (f"Nearest boundary distance: ${distance_to_nearest_boundary:,.2f}",),
         )
+
+
+def _microstructure_evidence(feature: MicrostructureFeatures) -> tuple[str, ...]:
+    values = [
+        f"Quote age: {feature.freshness_seconds:.0f}s",
+        f"Usable quotes: {feature.quote_observations}",
+    ]
+    if feature.spread is not None:
+        values.append(f"Recorded spread: {feature.spread:.1%}")
+    if feature.depth_imbalance is not None:
+        values.append(f"Depth imbalance: {feature.depth_imbalance:+.2f}")
+    if feature.coinbase_momentum_60s_bps is not None:
+        values.append(f"Coinbase 60s momentum: {feature.coinbase_momentum_60s_bps:+.1f} bps")
+    if feature.quote_change_60s_points is not None:
+        values.append(f"Kalshi 60s quote move: {feature.quote_change_60s_points:+.1%}")
+    if feature.repricing_delay_seconds is not None:
+        values.append(f"Observed repricing delay: {feature.repricing_delay_seconds:.1f}s")
+    return tuple(values)

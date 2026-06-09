@@ -30,6 +30,7 @@ class RecorderConfig:
     coinbase_interval: float = 5.0
     heartbeat_interval: float = 5.0
     rest_book_interval: float = 15.0
+    market_refresh_interval: float = 60.0
     reconnect_max: float = 30.0
     duration_seconds: float | None = None
 
@@ -100,6 +101,8 @@ class LiveFeedRecorder:
         backoff = 1.0
         while self.running and not self._expired():
             try:
+                markets = self.selected_markets()
+                self.books = {ticker: OrderBookState() for ticker in markets}
                 self._record_connection(markets)
                 backoff = 1.0
             except Exception as error:
@@ -242,8 +245,14 @@ class LiveFeedRecorder:
         next_coinbase = 0.0
         next_books = 0.0
         next_heartbeat = 0.0
+        next_market_refresh = time.monotonic() + self.config.market_refresh_interval
         while self.running and not self._expired():
             now = time.monotonic()
+            if now >= next_market_refresh:
+                refreshed = self.selected_markets()
+                markets[:] = refreshed
+                self.books = {ticker: OrderBookState() for ticker in markets}
+                next_market_refresh = now + self.config.market_refresh_interval
             if now >= next_coinbase:
                 self._record_coinbase()
                 next_coinbase = now + self.config.coinbase_interval

@@ -49,6 +49,9 @@ order endpoint.
 - Contract interpreter: validates event, range, expiry, and settlement rules.
 - Quant: compares modeled probability with the executable YES ask after estimated fees.
 - Market quality: checks displayed spread and ask size.
+- Microstructure: consumes recorded quote freshness, spread, depth imbalance, BTC momentum, quote
+  movement, and observed repricing delay. Unrecorded or stale contracts are vetoed, and a paper
+  trade requires positive microstructure support rather than a neutral watch verdict.
 - Settlement risk: highlights Coinbase-to-BRTI basis risk.
 - Skeptic: challenges contracts near settlement boundaries.
 

@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from polyscanner.agents import (
     ContractAgent,
     MarketQualityAgent,
+    MicrostructureAgent,
     QuantAgent,
     SettlementAgent,
     SkepticAgent,
 )
 from polyscanner.models import ProbabilityEstimate, ThresholdContract
 from polyscanner.orchestrator import OpportunityOrchestrator, TradeDecision
+from polyscanner.features import MicrostructureFeatureEngine
+from polyscanner.storage import SnapshotStore
 
 
 @dataclass(frozen=True)
@@ -21,15 +24,22 @@ class RankedOpportunity:
     decision: TradeDecision
 
 
-def default_orchestrator() -> OpportunityOrchestrator:
-    return OpportunityOrchestrator(
+def default_orchestrator(store: SnapshotStore | None = None) -> OpportunityOrchestrator:
+    agents = [
+        ContractAgent(),
+        QuantAgent(),
+        MarketQualityAgent(),
+    ]
+    if store is not None:
+        agents.append(MicrostructureAgent(MicrostructureFeatureEngine(store)))
+    agents.extend(
         [
-            ContractAgent(),
-            QuantAgent(),
-            MarketQualityAgent(),
             SettlementAgent(),
             SkepticAgent(),
         ]
+    )
+    return OpportunityOrchestrator(
+        agents
     )
 
 
@@ -39,8 +49,9 @@ def rank_opportunities(
     event_exposure: dict[str, float] | None = None,
     total_exposure: float = 0,
     orchestrator: OpportunityOrchestrator | None = None,
+    store: SnapshotStore | None = None,
 ) -> list[RankedOpportunity]:
-    engine = orchestrator or default_orchestrator()
+    engine = orchestrator or default_orchestrator(store)
     exposure_by_event = dict(event_exposure or {})
     selected_events = {
         ticker for ticker, exposure in exposure_by_event.items() if exposure > 0

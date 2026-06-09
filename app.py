@@ -90,9 +90,27 @@ if scan_clicked or "scan_result" not in st.session_state:
         st.stop()
 
 result = st.session_state.scan_result
-ranked = rank_opportunities(result.contracts, paper_equity)
+ranked = rank_opportunities(result.contracts, paper_equity, store=store())
 paper_trades = [item for item in ranked if item.decision.action == "PAPER TRADE"]
 watch_items = [item for item in ranked if item.decision.action == "WATCH"]
+
+
+def microstructure_opinion(item):
+    return next(
+        (opinion for opinion in item.decision.opinions if opinion.agent == "Microstructure"),
+        None,
+    )
+
+
+display_ranked = sorted(
+    ranked,
+    key=lambda item: (
+        microstructure_opinion(item) is None
+        or microstructure_opinion(item).summary.startswith("No recorded")
+        or microstructure_opinion(item).summary.startswith("Recorded order-book evidence is stale"),
+        -(item.estimate.edge_after_fee or -999),
+    ),
+)
 
 cols = st.columns(4)
 cols[0].metric(
@@ -179,9 +197,10 @@ st.write(
     "stops allocating when the 25% paper exposure ceiling is reached."
 )
 feed_rows = []
-for item in ranked[:20]:
+for item in display_ranked[:20]:
     contract = item.contract
     estimate = item.estimate
+    microstructure = microstructure_opinion(item)
     feed_rows.append(
         {
             "Rank": item.rank,
@@ -192,6 +211,7 @@ for item in ranked[:20]:
             "Model": estimate.probability,
             "After-fee gap": estimate.edge_after_fee,
             "Paper stake": item.decision.stake_usd,
+            "Microstructure": microstructure.summary if microstructure else "Not evaluated",
             "Event": contract.event_ticker,
         }
     )
@@ -206,6 +226,7 @@ feed_frame = pd.DataFrame(
         "Model",
         "After-fee gap",
         "Paper stake",
+        "Microstructure",
         "Event",
     ],
 )
@@ -294,7 +315,7 @@ else:
         f"{row['Event subtitle']} · {row['Event ticker']}": row["Event ticker"]
         for _, row in events.iterrows()
     }
-    focus_item = paper_trades[0] if paper_trades else ranked[0]
+    focus_item = paper_trades[0] if paper_trades else display_ranked[0]
     focus_event = focus_item.contract.event_ticker
     event_options = list(event_labels)
     default_event_index = next(
@@ -368,7 +389,20 @@ else:
         for contract, estimate in ranked_contracts
         if contract.cap_strike_usd is not None and contract.best_ask is not None
     }
-    selected_label = st.selectbox("Inspect a contract", list(contract_labels))
+    contract_options = list(contract_labels)
+    default_contract_index = next(
+        (
+            index
+            for index, label in enumerate(contract_options)
+            if contract_labels[label][0].market_id == focus_item.contract.market_id
+        ),
+        0,
+    )
+    selected_label = st.selectbox(
+        "Inspect a contract",
+        contract_options,
+        index=default_contract_index,
+    )
     selected_contract, selected_estimate = contract_labels[selected_label]
     detail_cols = st.columns(4)
     detail_cols[0].metric(
@@ -400,7 +434,7 @@ else:
         )
 
     st.subheader("Agent decision")
-    orchestrator = default_orchestrator()
+    orchestrator = default_orchestrator(store())
     decision = orchestrator.decide(
         selected_contract,
         selected_estimate,

@@ -3,6 +3,7 @@
 from polyscanner.agents.core import (
     ContractAgent,
     MarketQualityAgent,
+    MicrostructureAgent,
     QuantAgent,
     SettlementAgent,
     SkepticAgent,
@@ -11,6 +12,7 @@ from polyscanner.agents.core import (
 __all__ = [
     "ContractAgent",
     "MarketQualityAgent",
+    "MicrostructureAgent",
     "QuantAgent",
     "SettlementAgent",
     "SkepticAgent",

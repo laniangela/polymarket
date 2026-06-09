@@ -9,6 +9,7 @@ from polyscanner.agents import (
 )
 from polyscanner.models import Direction, ProbabilityEstimate, ThresholdContract
 from polyscanner.orchestrator import OpportunityOrchestrator
+from polyscanner.agents.core import AgentOpinion, Verdict
 
 
 def opportunity(edge: float):
@@ -56,3 +57,22 @@ def test_small_edge_is_rejected_by_quant_agent():
     contract, estimate = opportunity(0.01)
     orchestrator = OpportunityOrchestrator([ContractAgent(), QuantAgent()])
     assert orchestrator.decide(contract, estimate, equity=1_000).action == "REJECT"
+
+
+class WatchingMicrostructureAgent:
+    def evaluate(self, contract, estimate):
+        return AgentOpinion(
+            "Microstructure",
+            Verdict.WATCH,
+            0.5,
+            "No measurable lag yet.",
+            (),
+        )
+
+
+def test_microstructure_must_support_before_paper_trade():
+    contract, estimate = opportunity(0.08)
+    orchestrator = OpportunityOrchestrator(
+        [ContractAgent(), QuantAgent(), WatchingMicrostructureAgent()]
+    )
+    assert orchestrator.decide(contract, estimate, equity=1_000).action == "WATCH"

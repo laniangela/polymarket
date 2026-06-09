@@ -44,6 +44,19 @@ class OpportunityOrchestrator:
         if vetoes:
             return TradeDecision("REJECT", 0, 0, vetoes, opinions)
 
+        microstructure = next(
+            (opinion for opinion in opinions if opinion.agent == "Microstructure"),
+            None,
+        )
+        if microstructure is not None and microstructure.verdict != Verdict.SUPPORT:
+            return TradeDecision(
+                "WATCH",
+                0,
+                0,
+                ("The microstructure agent has not confirmed a measurable lag.",),
+                opinions,
+            )
+
         edge = estimate.edge_after_fee or 0
         if edge >= self.policy.exceptional_edge:
             allocation = self.policy.exceptional_allocation

@@ -196,3 +196,13 @@ class SnapshotStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def feed_observations_since(self, since: str) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM feed_observations WHERE observed_at >= ? "
+                "ORDER BY observed_at ASC",
+                (since,),
+            ).fetchall()
+        return [dict(row) for row in rows]
