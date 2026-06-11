@@ -26,6 +26,7 @@ class Paper15mConfig:
     max_spread: float = 0.05
     min_ask_size: float = 10
     max_open_exposure: float = 0.25
+    require_lag: bool = True
     duration_seconds: float | None = None
 
 
@@ -134,17 +135,19 @@ class Paper15mEngine:
                 entry_price=entry_price, edge=edge,
             )
             return None
-        feature_engine = MicrostructureFeatureEngine(self.store, now=now)
-        opinion = MicrostructureAgent(feature_engine).evaluate_features(
-            feature_engine.calculate(ticker)
-        )
-        if opinion.verdict.value != "support":
-            self._record_evaluation(
-                market, now, close, "watch", opinion.summary,
-                side=side, spot=spot, target=target, probability=probability,
-                entry_price=entry_price, edge=edge, opinion=opinion,
+        opinion = None
+        if self.config.require_lag:
+            feature_engine = MicrostructureFeatureEngine(self.store, now=now)
+            opinion = MicrostructureAgent(feature_engine).evaluate_features(
+                feature_engine.calculate(ticker)
             )
-            return None
+            if opinion.verdict.value != "support":
+                self._record_evaluation(
+                    market, now, close, "watch", opinion.summary,
+                    side=side, spot=spot, target=target, probability=probability,
+                    entry_price=entry_price, edge=edge, opinion=opinion,
+                )
+                return None
         summary = self.store.paper_15m_summary(self.config.initial_equity)
         open_stake = sum(
             float(position["stake_usd"])
@@ -193,8 +196,8 @@ class Paper15mEngine:
                 "stake_usd": stake,
                 "quantity": quantity,
                 "entry_fee_usd": quantity * fee_per_contract,
-                "agent_verdict": opinion.verdict.value,
-                "agent_summary": opinion.summary,
+                "agent_verdict": opinion.verdict.value if opinion else "not_required",
+                "agent_summary": opinion.summary if opinion else "Model-only comparison cohort.",
             }
         )
         self._record_evaluation(
@@ -298,12 +301,19 @@ def main() -> None:
     parser.add_argument("--database", default="data/scanner.db")
     parser.add_argument("--equity", type=float, default=1000)
     parser.add_argument("--duration", type=float)
+    parser.add_argument(
+        "--strategy",
+        choices=("lag", "model-only"),
+        default="lag",
+        help="Require measured repricing lag or test the same model/risk rules without it.",
+    )
     args = parser.parse_args()
     engine = Paper15mEngine(
         Paper15mConfig(
             database=args.database,
             initial_equity=args.equity,
             duration_seconds=args.duration,
+            require_lag=args.strategy == "lag",
         )
     )
     signal.signal(signal.SIGINT, engine.stop)

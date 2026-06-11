@@ -58,6 +58,12 @@ source .venv/bin/activate
 kalshi-15m-paper --duration 7200 --equity 1000
 ```
 
+Run the parallel model-only cohort in another terminal:
+
+```bash
+kalshi-15m-paper --database data/model_only.db --strategy model-only --duration 7200 --equity 1000
+```
+
 This process evaluates each active `KXBTC15M` market and records why it entered or stayed out. A
 paper bet requires at least 4% estimated edge after the entry fee, a spread no wider than 5%, at
 least 10 contracts at the ask, and a Microstructure Agent `SUPPORT` verdict based on measured

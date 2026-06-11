@@ -149,3 +149,19 @@ def test_position_requires_full_size_at_displayed_ask(tmp_path):
         assert engine.observe_and_consider(kalshi.market_payload(), now) is None
     evaluation = store.paper_15m_evaluations()[0]
     assert "required contracts" in evaluation["reason"]
+
+
+def test_model_only_cohort_does_not_require_lag_support(tmp_path):
+    now = datetime.now(timezone.utc)
+    kalshi = FakeKalshi(now + timedelta(minutes=5))
+    store = SnapshotStore(tmp_path / "paper.db")
+    engine = Paper15mEngine(
+        Paper15mConfig(database=str(tmp_path / "paper.db"), require_lag=False),
+        store=store,
+        kalshi=kalshi,
+        coinbase=FakeCoinbase(),
+    )
+    position_id = engine.observe_and_consider(kalshi.market_payload(), now)
+    assert position_id is not None
+    position = store.paper_15m_positions()[0]
+    assert position["agent_verdict"] == "not_required"

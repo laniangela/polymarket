@@ -78,6 +78,11 @@ def store() -> SnapshotStore:
     return SnapshotStore()
 
 
+@st.cache_resource
+def model_only_store() -> SnapshotStore:
+    return SnapshotStore("data/model_only.db")
+
+
 scan_clicked = st.button("Run live scan", type="primary")
 
 if scan_clicked or "scan_result" not in st.session_state:
@@ -257,18 +262,34 @@ with st.expander("Recent Microstructure Agent signals"):
 
 st.subheader("15-minute hold-to-settlement test")
 st.write(
-    "This is the outcome strategy: evaluate each live `KXBTC15M` market, enter at the "
-    "displayed ask only when the lag agent and risk gates support it, then hold the contract "
-    "until Kalshi finalizes it as YES or NO. There is no early resale in this test."
+    "Two cohorts evaluate the same live `KXBTC15M` markets and hold any entry to final YES/NO "
+    "settlement. The lag cohort requires measured repricing delay; the model-only cohort uses "
+    "the same probability, fee, spread, full-depth, sizing, and exposure rules without that gate."
 )
 paper_15m_summary = store().paper_15m_summary(paper_equity)
-paper_15m_cols = st.columns(6)
-paper_15m_cols[0].metric("Markets evaluated", paper_15m_summary["evaluated"])
-paper_15m_cols[1].metric("Bets entered", paper_15m_summary["positions"])
-paper_15m_cols[2].metric("Open", paper_15m_summary["open"])
-paper_15m_cols[3].metric("Settled", paper_15m_summary["settled"])
-paper_15m_cols[4].metric("Wins", paper_15m_summary["wins"])
-paper_15m_cols[5].metric("Realized P&L", f"${paper_15m_summary['realized_pnl']:+,.2f}")
+model_15m_summary = model_only_store().paper_15m_summary(paper_equity)
+comparison_frame = pd.DataFrame(
+    [
+        {"Cohort": "Lag required", **paper_15m_summary},
+        {"Cohort": "Model only", **model_15m_summary},
+    ]
+).rename(
+    columns={
+        "evaluated": "Markets evaluated", "positions": "Bets entered", "open": "Open",
+        "settled": "Settled", "wins": "Wins", "realized_pnl": "Realized P&L",
+        "average_return": "Average return", "equity": "Paper equity",
+    }
+)
+st.dataframe(
+    comparison_frame[
+        ["Cohort", "Markets evaluated", "Bets entered", "Open", "Settled", "Wins", "Realized P&L", "Average return", "Paper equity"]
+    ].style.format(
+        {"Realized P&L": "${:+,.2f}", "Average return": "{:+.1%}", "Paper equity": "${:,.2f}"},
+        na_rep="Pending",
+    ),
+    width="stretch",
+    hide_index=True,
+)
 
 paper_15m_evaluations = store().paper_15m_evaluations(limit=20)
 if paper_15m_evaluations:
@@ -355,6 +376,18 @@ if paper_15m_positions:
             width="stretch",
             hide_index=True,
         )
+
+model_15m_evaluations = model_only_store().paper_15m_evaluations(limit=20)
+model_15m_positions = model_only_store().paper_15m_positions(limit=20)
+with st.expander("Model-only cohort details"):
+    if model_15m_evaluations:
+        st.caption("Recent evaluations")
+        st.dataframe(pd.DataFrame(model_15m_evaluations), width="stretch", hide_index=True)
+    if model_15m_positions:
+        st.caption("Entries and settlements")
+        st.dataframe(pd.DataFrame(model_15m_positions), width="stretch", hide_index=True)
+    if not model_15m_evaluations:
+        st.caption("No model-only markets evaluated yet.")
 
 st.subheader("Best opportunities now")
 st.write(
