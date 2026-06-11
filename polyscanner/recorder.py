@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import websocket
+import certifi
 
 from polyscanner.auth import KalshiCredentials, KalshiRequestSigner
 from polyscanner.live import (
@@ -131,6 +132,7 @@ class LiveFeedRecorder:
             self.URL,
             header=headers,
             timeout=1,
+            sslopt={"ca_certs": certifi.where()},
         )
         try:
             connection.send(
