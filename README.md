@@ -72,6 +72,12 @@ entered contract is never resold: it remains open until Kalshi reports the final
 then payout and P&L are calculated from that result. The dashboard shows every market evaluated,
 all rejection reasons, open bets, and settled outcomes.
 
+New entries also require the authenticated CF Benchmarks BRTI feed. The engine uses the fresh BRTI
+60-second settlement reference as the probability input, rejects data older than 10 seconds,
+rejects an absolute Coinbase/BRTI basis above $30, and requires at least a $25 BRTI buffer on the
+selected side inside the final two minutes. If credentials or BRTI are unavailable, the engine
+records a blocked evaluation and makes no paper bet.
+
 ## Current agents
 
 - Contract interpreter: validates event, range, expiry, and settlement rules.

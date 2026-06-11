@@ -66,15 +66,28 @@ class SupportingAgent:
         )
 
 
+def seed_brti(store, now, value=62_200.0):
+    store.record_feed_observation(
+        observed_at=now.isoformat(),
+        source="brti",
+        coinbase_spot=value,
+        brti_value=value,
+        brti_60s_average=value,
+        settlement_window_average=value,
+    )
+
+
 def test_paper_position_is_held_and_paid_from_final_result(tmp_path):
     now = datetime.now(timezone.utc)
     kalshi = FakeKalshi(now + timedelta(minutes=5))
     store = SnapshotStore(tmp_path / "paper.db")
+    seed_brti(store, now)
     engine = Paper15mEngine(
         Paper15mConfig(database=str(tmp_path / "paper.db")),
         store=store,
         kalshi=kalshi,
         coinbase=FakeCoinbase(),
+        settlement_store=store,
     )
     with patch("polyscanner.paper_15m.MicrostructureAgent", SupportingAgent):
         position_id = engine.observe_and_consider(kalshi.market_payload(), now)
@@ -96,11 +109,13 @@ def test_losing_side_has_negative_settlement_pnl(tmp_path):
     now = datetime.now(timezone.utc)
     kalshi = FakeKalshi(now + timedelta(minutes=5))
     store = SnapshotStore(tmp_path / "paper.db")
+    seed_brti(store, now)
     engine = Paper15mEngine(
         Paper15mConfig(database=str(tmp_path / "paper.db")),
         store=store,
         kalshi=kalshi,
         coinbase=FakeCoinbase(),
+        settlement_store=store,
     )
     with patch("polyscanner.paper_15m.MicrostructureAgent", SupportingAgent):
         engine.observe_and_consider(kalshi.market_payload(), now)
@@ -117,11 +132,13 @@ def test_watch_decision_is_recorded_when_lag_is_not_supported(tmp_path):
     now = datetime.now(timezone.utc)
     kalshi = FakeKalshi(now + timedelta(minutes=5))
     store = SnapshotStore(tmp_path / "paper.db")
+    seed_brti(store, now)
     engine = Paper15mEngine(
         Paper15mConfig(database=str(tmp_path / "paper.db")),
         store=store,
         kalshi=kalshi,
         coinbase=FakeCoinbase(),
+        settlement_store=store,
     )
     assert engine.observe_and_consider(kalshi.market_payload(), now) is None
     evaluation = store.paper_15m_evaluations()[0]
@@ -133,11 +150,13 @@ def test_position_requires_full_size_at_displayed_ask(tmp_path):
     now = datetime.now(timezone.utc)
     kalshi = FakeKalshi(now + timedelta(minutes=5))
     store = SnapshotStore(tmp_path / "paper.db")
+    seed_brti(store, now)
     engine = Paper15mEngine(
         Paper15mConfig(database=str(tmp_path / "paper.db"), min_ask_size=1),
         store=store,
         kalshi=kalshi,
         coinbase=FakeCoinbase(),
+        settlement_store=store,
     )
     kalshi.market_book = lambda ticker: {
         "orderbook_fp": {
@@ -155,11 +174,13 @@ def test_model_only_cohort_does_not_require_lag_support(tmp_path):
     now = datetime.now(timezone.utc)
     kalshi = FakeKalshi(now + timedelta(minutes=5))
     store = SnapshotStore(tmp_path / "paper.db")
+    seed_brti(store, now)
     engine = Paper15mEngine(
         Paper15mConfig(database=str(tmp_path / "paper.db"), require_lag=False),
         store=store,
         kalshi=kalshi,
         coinbase=FakeCoinbase(),
+        settlement_store=store,
     )
     position_id = engine.observe_and_consider(kalshi.market_payload(), now)
     assert position_id is not None

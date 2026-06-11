@@ -266,6 +266,35 @@ st.write(
     "settlement. The lag cohort requires measured repricing delay; the model-only cohort uses "
     "the same probability, fee, spread, full-depth, sizing, and exposure rules without that gate."
 )
+latest_brti = store().latest_brti_observation()
+if latest_brti is None:
+    st.error(
+        "Settlement controls are BLOCKED: no authenticated BRTI observation is available. "
+        "Both paper cohorts reject new entries until the Kalshi BRTI recorder is connected."
+    )
+else:
+    brti_time = datetime.fromisoformat(str(latest_brti["observed_at"]))
+    brti_time = brti_time.replace(tzinfo=brti_time.tzinfo or timezone.utc)
+    brti_age = (datetime.now(timezone.utc) - brti_time).total_seconds()
+    status = "READY" if brti_age <= 10 else "STALE"
+    settlement_cols = st.columns(5)
+    settlement_cols[0].metric("Settlement controls", status)
+    settlement_cols[1].metric("BRTI", f"${float(latest_brti['brti_value']):,.2f}")
+    settlement_cols[2].metric(
+        "BRTI 60s average",
+        f"${float(latest_brti['brti_60s_average']):,.2f}"
+        if latest_brti.get("brti_60s_average") is not None else "Missing",
+    )
+    settlement_cols[3].metric("BRTI age", f"{brti_age:.1f}s")
+    basis = (
+        float(latest_brti["coinbase_spot"]) - float(latest_brti["brti_value"])
+        if latest_brti.get("coinbase_spot") is not None else None
+    )
+    settlement_cols[4].metric("Coinbase/BRTI basis", f"${basis:+,.2f}" if basis is not None else "Missing")
+st.caption(
+    "Hard controls: BRTI age ≤10s, absolute Coinbase/BRTI basis ≤$30, valid 60-second "
+    "BRTI reference, and at least $25 settlement buffer for entries inside the final two minutes."
+)
 paper_15m_summary = store().paper_15m_summary(paper_equity)
 model_15m_summary = model_only_store().paper_15m_summary(paper_equity)
 comparison_frame = pd.DataFrame(
@@ -319,6 +348,7 @@ if paper_15m_evaluations:
                 [
                     "Close", "Market", "Decision", "Reason", "Side", "Coinbase spot",
                     "BRTI target", "Model probability", "Ask", "After-fee edge",
+                    "brti_value", "brti_60s_average", "coinbase_brti_basis", "settlement_buffer",
                 ]
             ].style.format(
                 {
@@ -380,6 +410,11 @@ if paper_15m_positions:
 model_15m_evaluations = model_only_store().paper_15m_evaluations(limit=20)
 model_15m_positions = model_only_store().paper_15m_positions(limit=20)
 with st.expander("Model-only cohort details"):
+    if any(position.get("brti_value") is None for position in model_15m_positions):
+        st.warning(
+            "Positions without BRTI evidence predate the settlement-control layer and should "
+            "not be combined with controlled results."
+        )
     if model_15m_evaluations:
         st.caption("Recent evaluations")
         st.dataframe(pd.DataFrame(model_15m_evaluations), width="stretch", hide_index=True)

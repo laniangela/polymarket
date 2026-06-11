@@ -95,6 +95,30 @@ class SnapshotStore:
                 "modeled_probability REAL, entry_price REAL, estimated_edge REAL, "
                 "agent_verdict TEXT, agent_summary TEXT)"
             )
+            position_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(paper_15m_positions)")
+            }
+            evaluation_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(paper_15m_evaluations)")
+            }
+            settlement_columns = {
+                "brti_value": "REAL",
+                "brti_60s_average": "REAL",
+                "settlement_window_average": "REAL",
+                "brti_age_seconds": "REAL",
+                "coinbase_brti_basis": "REAL",
+                "settlement_reference": "REAL",
+                "settlement_buffer": "REAL",
+            }
+            for column, column_type in settlement_columns.items():
+                if column not in position_columns:
+                    connection.execute(
+                        f"ALTER TABLE paper_15m_positions ADD COLUMN {column} {column_type}"
+                    )
+                if column not in evaluation_columns:
+                    connection.execute(
+                        f"ALTER TABLE paper_15m_evaluations ADD COLUMN {column} {column_type}"
+                    )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -246,6 +270,15 @@ class SnapshotStore:
                 (since,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def latest_brti_observation(self) -> dict[str, object] | None:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM feed_observations WHERE brti_value IS NOT NULL "
+                "ORDER BY observed_at DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
 
     def record_microstructure_signal(
         self,
@@ -411,7 +444,9 @@ class SnapshotStore:
                 "market_ticker, opened_at, closes_at, side, target_price, reference_spot, "
                 "modeled_probability, entry_price, estimated_edge, allocation_pct, stake_usd, "
                 "quantity, entry_fee_usd, agent_verdict, agent_summary"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ", brti_value, brti_60s_average, settlement_window_average, brti_age_seconds, "
+                "coinbase_brti_basis, settlement_reference, settlement_buffer"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 tuple(
                     values[key]
                     for key in (
@@ -430,6 +465,13 @@ class SnapshotStore:
                         "entry_fee_usd",
                         "agent_verdict",
                         "agent_summary",
+                        "brti_value",
+                        "brti_60s_average",
+                        "settlement_window_average",
+                        "brti_age_seconds",
+                        "coinbase_brti_basis",
+                        "settlement_reference",
+                        "settlement_buffer",
                     )
                 ),
             )
@@ -442,7 +484,9 @@ class SnapshotStore:
                 "market_ticker, first_evaluated_at, last_evaluated_at, closes_at, decision, "
                 "reason, side, reference_spot, target_price, modeled_probability, entry_price, "
                 "estimated_edge, agent_verdict, agent_summary"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ", brti_value, brti_60s_average, settlement_window_average, brti_age_seconds, "
+                "coinbase_brti_basis, settlement_reference, settlement_buffer"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(market_ticker) DO UPDATE SET "
                 "last_evaluated_at = excluded.last_evaluated_at, "
                 "decision = CASE WHEN decision = 'entered' THEN decision ELSE excluded.decision END, "
@@ -454,7 +498,14 @@ class SnapshotStore:
                 "entry_price = CASE WHEN decision = 'entered' THEN entry_price ELSE excluded.entry_price END, "
                 "estimated_edge = CASE WHEN decision = 'entered' THEN estimated_edge ELSE excluded.estimated_edge END, "
                 "agent_verdict = CASE WHEN decision = 'entered' THEN agent_verdict ELSE excluded.agent_verdict END, "
-                "agent_summary = CASE WHEN decision = 'entered' THEN agent_summary ELSE excluded.agent_summary END",
+                "agent_summary = CASE WHEN decision = 'entered' THEN agent_summary ELSE excluded.agent_summary END, "
+                "brti_value = CASE WHEN decision = 'entered' THEN brti_value ELSE excluded.brti_value END, "
+                "brti_60s_average = CASE WHEN decision = 'entered' THEN brti_60s_average ELSE excluded.brti_60s_average END, "
+                "settlement_window_average = CASE WHEN decision = 'entered' THEN settlement_window_average ELSE excluded.settlement_window_average END, "
+                "brti_age_seconds = CASE WHEN decision = 'entered' THEN brti_age_seconds ELSE excluded.brti_age_seconds END, "
+                "coinbase_brti_basis = CASE WHEN decision = 'entered' THEN coinbase_brti_basis ELSE excluded.coinbase_brti_basis END, "
+                "settlement_reference = CASE WHEN decision = 'entered' THEN settlement_reference ELSE excluded.settlement_reference END, "
+                "settlement_buffer = CASE WHEN decision = 'entered' THEN settlement_buffer ELSE excluded.settlement_buffer END",
                 (
                     values["market_ticker"],
                     values["evaluated_at"],
@@ -470,6 +521,13 @@ class SnapshotStore:
                     values.get("estimated_edge"),
                     values.get("agent_verdict"),
                     values.get("agent_summary"),
+                    values.get("brti_value"),
+                    values.get("brti_60s_average"),
+                    values.get("settlement_window_average"),
+                    values.get("brti_age_seconds"),
+                    values.get("coinbase_brti_basis"),
+                    values.get("settlement_reference"),
+                    values.get("settlement_buffer"),
                 ),
             )
 

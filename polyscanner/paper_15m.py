@@ -12,6 +12,7 @@ from polyscanner.live import parse_rest_orderbook
 from polyscanner.models import Direction
 from polyscanner.probability import annualized_realized_volatility, threshold_probability
 from polyscanner.providers import CoinbasePublicClient, KalshiPublicClient
+from polyscanner.settlement import SettlementGuard, SettlementState
 from polyscanner.storage import SnapshotStore
 
 
@@ -27,6 +28,7 @@ class Paper15mConfig:
     min_ask_size: float = 10
     max_open_exposure: float = 0.25
     require_lag: bool = True
+    settlement_database: str | None = "data/scanner.db"
     duration_seconds: float | None = None
 
 
@@ -39,11 +41,18 @@ class Paper15mEngine:
         store: SnapshotStore | None = None,
         kalshi: KalshiPublicClient | None = None,
         coinbase: CoinbasePublicClient | None = None,
+        settlement_store: SnapshotStore | None = None,
     ) -> None:
         self.config = config or Paper15mConfig()
         self.store = store or SnapshotStore(self.config.database)
         self.kalshi = kalshi or KalshiPublicClient()
         self.coinbase = coinbase or CoinbasePublicClient()
+        self.settlement_store = settlement_store or (
+            self.store
+            if self.config.settlement_database is None
+            else SnapshotStore(self.config.settlement_database)
+        )
+        self.settlement_guard = SettlementGuard(self.settlement_store)
         self.running = True
         self.started = time.monotonic()
         self.volatility = self._volatility()
@@ -90,15 +99,35 @@ class Paper15mEngine:
             )
             return None
         target = float(market["floor_strike"])
+        yes_ask = quote.yes_ask
+        no_ask = 1 - quote.yes_bid if quote.yes_bid is not None else None
+        settlement = self.settlement_guard.evaluate(
+            now=now,
+            closes_at=close,
+            target_price=target,
+            coinbase_spot=spot,
+            side=None,
+        )
+        if not settlement.allowed:
+            self._record_evaluation(
+                market, now, close, "watch", settlement.reason,
+                spot=spot, target=target, settlement=settlement,
+            )
+            return None
+        model_spot = settlement.reference_value
+        if model_spot is None:
+            self._record_evaluation(
+                market, now, close, "watch", "No usable BRTI settlement reference is available.",
+                spot=spot, target=target, settlement=settlement,
+            )
+            return None
         yes_probability = threshold_probability(
-            spot,
+            model_spot,
             target,
             self.volatility,
             remaining,
             Direction.ABOVE,
         )
-        yes_ask = quote.yes_ask
-        no_ask = 1 - quote.yes_bid if quote.yes_bid is not None else None
         choices = [
             ("yes", yes_probability, yes_ask),
             ("no", 1 - yes_probability, no_ask),
@@ -110,9 +139,23 @@ class Paper15mEngine:
         edge = _edge(probability, entry_price, self.FEE_COEFFICIENT)
         if entry_price is None or edge < self.config.min_edge:
             self._record_evaluation(
-                market, now, close, "watch", "Fee-adjusted edge is below 4%.",
+                market, now, close, "watch", "BRTI-based edge is below 4%.",
                 side=side, spot=spot, target=target, probability=probability,
-                entry_price=entry_price, edge=edge,
+                entry_price=entry_price, edge=edge, settlement=settlement,
+            )
+            return None
+        settlement = self.settlement_guard.evaluate(
+            now=now,
+            closes_at=close,
+            target_price=target,
+            coinbase_spot=spot,
+            side=side,
+        )
+        if not settlement.allowed:
+            self._record_evaluation(
+                market, now, close, "watch", settlement.reason,
+                side=side, spot=spot, target=target, probability=probability,
+                entry_price=entry_price, edge=edge, settlement=settlement,
             )
             return None
         spread = (
@@ -126,6 +169,7 @@ class Paper15mEngine:
                 market, now, close, "watch", "Displayed spread exceeds 5%.",
                 side=side, spot=spot, target=target, probability=probability,
                 entry_price=entry_price, edge=edge,
+                settlement=settlement,
             )
             return None
         if ask_size is None or ask_size < self.config.min_ask_size:
@@ -133,6 +177,7 @@ class Paper15mEngine:
                 market, now, close, "watch", "Fewer than 10 contracts are available at the ask.",
                 side=side, spot=spot, target=target, probability=probability,
                 entry_price=entry_price, edge=edge,
+                settlement=settlement,
             )
             return None
         opinion = None
@@ -146,6 +191,7 @@ class Paper15mEngine:
                     market, now, close, "watch", opinion.summary,
                     side=side, spot=spot, target=target, probability=probability,
                     entry_price=entry_price, edge=edge, opinion=opinion,
+                    settlement=settlement,
                 )
                 return None
         summary = self.store.paper_15m_summary(self.config.initial_equity)
@@ -158,6 +204,7 @@ class Paper15mEngine:
                 market, now, close, "watch", "Open exposure has reached the 25% ceiling.",
                 side=side, spot=spot, target=target, probability=probability,
                 entry_price=entry_price, edge=edge, opinion=opinion,
+                settlement=settlement,
             )
             return None
         allocation = 0.10 if edge >= 0.08 else 0.075
@@ -179,6 +226,7 @@ class Paper15mEngine:
                 entry_price=entry_price,
                 edge=edge,
                 opinion=opinion,
+                settlement=settlement,
             )
             return None
         position_id = self.store.create_paper_15m_position(
@@ -198,6 +246,7 @@ class Paper15mEngine:
                 "entry_fee_usd": quantity * fee_per_contract,
                 "agent_verdict": opinion.verdict.value if opinion else "not_required",
                 "agent_summary": opinion.summary if opinion else "Model-only comparison cohort.",
+                **_settlement_values(settlement),
             }
         )
         self._record_evaluation(
@@ -205,6 +254,7 @@ class Paper15mEngine:
             "Held to final YES/NO settlement." if position_id else "A position already exists.",
             side=side, spot=spot, target=target, probability=probability,
             entry_price=entry_price, edge=edge, opinion=opinion,
+            settlement=settlement,
         )
         return position_id
 
@@ -223,6 +273,7 @@ class Paper15mEngine:
         entry_price: float | None = None,
         edge: float | None = None,
         opinion: object | None = None,
+        settlement: SettlementState | None = None,
     ) -> None:
         self.store.record_paper_15m_evaluation(
             {
@@ -239,6 +290,7 @@ class Paper15mEngine:
                 "estimated_edge": edge,
                 "agent_verdict": getattr(getattr(opinion, "verdict", None), "value", None),
                 "agent_summary": getattr(opinion, "summary", None),
+                **_settlement_values(settlement),
             }
         )
 
@@ -296,6 +348,18 @@ def _optional_float(value: object) -> float | None:
     return None if value in (None, "") else float(value)
 
 
+def _settlement_values(state: SettlementState | None) -> dict[str, float | None]:
+    return {
+        "brti_value": state.brti_value if state else None,
+        "brti_60s_average": state.brti_60s_average if state else None,
+        "settlement_window_average": state.settlement_window_average if state else None,
+        "brti_age_seconds": state.age_seconds if state else None,
+        "coinbase_brti_basis": state.coinbase_basis_usd if state else None,
+        "settlement_reference": state.reference_value if state else None,
+        "settlement_buffer": state.target_buffer_usd if state else None,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trade Kalshi BTC 15-minute outcomes.")
     parser.add_argument("--database", default="data/scanner.db")
@@ -307,6 +371,11 @@ def main() -> None:
         default="lag",
         help="Require measured repricing lag or test the same model/risk rules without it.",
     )
+    parser.add_argument(
+        "--settlement-database",
+        default="data/scanner.db",
+        help="Database populated by the authenticated BRTI recorder.",
+    )
     args = parser.parse_args()
     engine = Paper15mEngine(
         Paper15mConfig(
@@ -314,6 +383,7 @@ def main() -> None:
             initial_equity=args.equity,
             duration_seconds=args.duration,
             require_lag=args.strategy == "lag",
+            settlement_database=args.settlement_database,
         )
     )
     signal.signal(signal.SIGINT, engine.stop)
