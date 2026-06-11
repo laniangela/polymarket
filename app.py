@@ -255,6 +255,107 @@ with st.expander("Recent Microstructure Agent signals"):
     else:
         st.caption("No validation signals recorded yet.")
 
+st.subheader("15-minute hold-to-settlement test")
+st.write(
+    "This is the outcome strategy: evaluate each live `KXBTC15M` market, enter at the "
+    "displayed ask only when the lag agent and risk gates support it, then hold the contract "
+    "until Kalshi finalizes it as YES or NO. There is no early resale in this test."
+)
+paper_15m_summary = store().paper_15m_summary(paper_equity)
+paper_15m_cols = st.columns(6)
+paper_15m_cols[0].metric("Markets evaluated", paper_15m_summary["evaluated"])
+paper_15m_cols[1].metric("Bets entered", paper_15m_summary["positions"])
+paper_15m_cols[2].metric("Open", paper_15m_summary["open"])
+paper_15m_cols[3].metric("Settled", paper_15m_summary["settled"])
+paper_15m_cols[4].metric("Wins", paper_15m_summary["wins"])
+paper_15m_cols[5].metric("Realized P&L", f"${paper_15m_summary['realized_pnl']:+,.2f}")
+
+paper_15m_evaluations = store().paper_15m_evaluations(limit=20)
+if paper_15m_evaluations:
+    latest_evaluation = paper_15m_evaluations[0]
+    st.caption(
+        f"Latest evaluation: {latest_evaluation['last_evaluated_at']} · "
+        f"{latest_evaluation['market_ticker']} · {latest_evaluation['decision'].upper()} · "
+        f"{latest_evaluation['reason']}"
+    )
+    with st.expander("Every 15-minute market evaluated", expanded=True):
+        evaluation_frame = pd.DataFrame(paper_15m_evaluations).rename(
+            columns={
+                "market_ticker": "Market",
+                "closes_at": "Close",
+                "decision": "Decision",
+                "reason": "Reason",
+                "side": "Side",
+                "reference_spot": "Coinbase spot",
+                "target_price": "BRTI target",
+                "modeled_probability": "Model probability",
+                "entry_price": "Ask",
+                "estimated_edge": "After-fee edge",
+            }
+        )
+        st.dataframe(
+            evaluation_frame[
+                [
+                    "Close", "Market", "Decision", "Reason", "Side", "Coinbase spot",
+                    "BRTI target", "Model probability", "Ask", "After-fee edge",
+                ]
+            ].style.format(
+                {
+                    "Coinbase spot": "${:,.2f}",
+                    "BRTI target": "${:,.2f}",
+                    "Model probability": "{:.1%}",
+                    "Ask": "{:.1%}",
+                    "After-fee edge": "{:+.1%}",
+                },
+                na_rep="—",
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+else:
+    st.info(
+        "The settlement test has not evaluated a market yet. Run "
+        "`kalshi-15m-paper --duration 7200 --equity 1000` in a second terminal."
+    )
+
+paper_15m_positions = store().paper_15m_positions(limit=20)
+if paper_15m_positions:
+    with st.expander("Paper bets and final outcomes", expanded=True):
+        position_frame = pd.DataFrame(paper_15m_positions).rename(
+            columns={
+                "market_ticker": "Market",
+                "opened_at": "Entered",
+                "closes_at": "Close",
+                "side": "Side",
+                "entry_price": "Entry ask",
+                "stake_usd": "Stake",
+                "status": "Status",
+                "result": "Kalshi result",
+                "payout_usd": "Payout",
+                "pnl_usd": "P&L",
+                "return_pct": "Return",
+            }
+        )
+        st.dataframe(
+            position_frame[
+                [
+                    "Entered", "Close", "Market", "Side", "Entry ask", "Stake", "Status",
+                    "Kalshi result", "Payout", "P&L", "Return",
+                ]
+            ].style.format(
+                {
+                    "Entry ask": "{:.1%}",
+                    "Stake": "${:,.2f}",
+                    "Payout": "${:,.2f}",
+                    "P&L": "${:+,.2f}",
+                    "Return": "{:+.1%}",
+                },
+                na_rep="Pending",
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
 st.subheader("Best opportunities now")
 st.write(
     "Every live BTC price bucket is reviewed automatically. The table ranks modeled gaps after "

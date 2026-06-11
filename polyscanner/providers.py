@@ -54,6 +54,33 @@ class KalshiPublicClient:
         response.raise_for_status()
         return response.json()
 
+    def active_bitcoin_15m_markets(self) -> list[dict[str, Any]]:
+        response = requests.get(
+            f"{self.BASE_URL}/events",
+            params={
+                "series_ticker": "KXBTC15M",
+                "status": "open",
+                "limit": 20,
+                "with_nested_markets": "true",
+            },
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return [
+            market
+            for event in response.json().get("events", [])
+            for market in event.get("markets", [])
+            if market.get("status") == "active"
+        ]
+
+    def market(self, ticker: str) -> dict[str, Any]:
+        response = requests.get(
+            f"{self.BASE_URL}/markets/{ticker}",
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()["market"]
+
 
 class KalshiAccountClient:
     BASE_URL = KalshiPublicClient.BASE_URL

@@ -32,3 +32,22 @@ def test_kalshi_client_fetches_only_events_within_14_days():
         markets = KalshiPublicClient().active_bitcoin_markets()
     assert markets[0]["ticker"] == "KXBTC-NEAR-B64000"
     assert request.call_count == 2
+
+
+def test_kalshi_client_fetches_active_15m_bitcoin_market():
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "events": [
+            {
+                "markets": [
+                    {"ticker": "ACTIVE", "status": "active"},
+                    {"ticker": "FUTURE", "status": "initialized"},
+                ]
+            }
+        ]
+    }
+    with patch("polyscanner.providers.requests.get", return_value=response) as request:
+        markets = KalshiPublicClient().active_bitcoin_15m_markets()
+    assert markets == [{"ticker": "ACTIVE", "status": "active"}]
+    assert request.call_args.kwargs["params"]["series_ticker"] == "KXBTC15M"

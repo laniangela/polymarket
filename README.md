@@ -49,6 +49,23 @@ signal is evaluated at 5, 15, 30, and 60-second horizons using the recorded entr
 available exit bid after the horizon. The validation report separates resolved observations from
 actually executable outcomes and subtracts estimated fees from hypothetical returns.
 
+## 15-minute outcome settlement test
+
+Run the actual hold-to-settlement strategy for two hours (about eight sequential BTC markets):
+
+```bash
+source .venv/bin/activate
+kalshi-15m-paper --duration 7200 --equity 1000
+```
+
+This process evaluates each active `KXBTC15M` market and records why it entered or stayed out. A
+paper bet requires at least 4% estimated edge after the entry fee, a spread no wider than 5%, at
+least 10 contracts at the ask, and a Microstructure Agent `SUPPORT` verdict based on measured
+Coinbase-to-Kalshi repricing delay. Open exposure is capped at 25% of current paper equity. An
+entered contract is never resold: it remains open until Kalshi reports the final YES/NO result,
+then payout and P&L are calculated from that result. The dashboard shows every market evaluated,
+all rejection reasons, open bets, and settled outcomes.
+
 ## Current agents
 
 - Contract interpreter: validates event, range, expiry, and settlement rules.

@@ -77,6 +77,24 @@ class SnapshotStore:
                 "FOREIGN KEY(signal_id) REFERENCES microstructure_signals(id), "
                 "UNIQUE(signal_id, horizon_seconds))"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS paper_15m_positions ("
+                "id INTEGER PRIMARY KEY, market_ticker TEXT NOT NULL UNIQUE, opened_at TEXT NOT NULL, "
+                "closes_at TEXT NOT NULL, side TEXT NOT NULL, target_price REAL NOT NULL, "
+                "reference_spot REAL NOT NULL, modeled_probability REAL NOT NULL, entry_price REAL NOT NULL, "
+                "estimated_edge REAL NOT NULL, allocation_pct REAL NOT NULL, stake_usd REAL NOT NULL, "
+                "quantity REAL NOT NULL, entry_fee_usd REAL NOT NULL, agent_verdict TEXT NOT NULL, "
+                "agent_summary TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', result TEXT, "
+                "settled_at TEXT, payout_usd REAL, pnl_usd REAL, return_pct REAL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS paper_15m_evaluations ("
+                "market_ticker TEXT PRIMARY KEY, first_evaluated_at TEXT NOT NULL, "
+                "last_evaluated_at TEXT NOT NULL, closes_at TEXT NOT NULL, decision TEXT NOT NULL, "
+                "reason TEXT NOT NULL, side TEXT, reference_spot REAL, target_price REAL, "
+                "modeled_probability REAL, entry_price REAL, estimated_edge REAL, "
+                "agent_verdict TEXT, agent_summary TEXT)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -384,4 +402,138 @@ class SnapshotStore:
             "supports": int(row[1]),
             "resolved": int(row[2]),
             "executable": int(row[3]),
+        }
+
+    def create_paper_15m_position(self, values: dict[str, object]) -> int | None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO paper_15m_positions("
+                "market_ticker, opened_at, closes_at, side, target_price, reference_spot, "
+                "modeled_probability, entry_price, estimated_edge, allocation_pct, stake_usd, "
+                "quantity, entry_fee_usd, agent_verdict, agent_summary"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                tuple(
+                    values[key]
+                    for key in (
+                        "market_ticker",
+                        "opened_at",
+                        "closes_at",
+                        "side",
+                        "target_price",
+                        "reference_spot",
+                        "modeled_probability",
+                        "entry_price",
+                        "estimated_edge",
+                        "allocation_pct",
+                        "stake_usd",
+                        "quantity",
+                        "entry_fee_usd",
+                        "agent_verdict",
+                        "agent_summary",
+                    )
+                ),
+            )
+            return int(cursor.lastrowid) if cursor.rowcount else None
+
+    def record_paper_15m_evaluation(self, values: dict[str, object]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO paper_15m_evaluations("
+                "market_ticker, first_evaluated_at, last_evaluated_at, closes_at, decision, "
+                "reason, side, reference_spot, target_price, modeled_probability, entry_price, "
+                "estimated_edge, agent_verdict, agent_summary"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(market_ticker) DO UPDATE SET "
+                "last_evaluated_at = excluded.last_evaluated_at, "
+                "decision = CASE WHEN decision = 'entered' THEN decision ELSE excluded.decision END, "
+                "reason = CASE WHEN decision = 'entered' THEN reason ELSE excluded.reason END, "
+                "side = CASE WHEN decision = 'entered' THEN side ELSE excluded.side END, "
+                "reference_spot = CASE WHEN decision = 'entered' THEN reference_spot ELSE excluded.reference_spot END, "
+                "target_price = CASE WHEN decision = 'entered' THEN target_price ELSE excluded.target_price END, "
+                "modeled_probability = CASE WHEN decision = 'entered' THEN modeled_probability ELSE excluded.modeled_probability END, "
+                "entry_price = CASE WHEN decision = 'entered' THEN entry_price ELSE excluded.entry_price END, "
+                "estimated_edge = CASE WHEN decision = 'entered' THEN estimated_edge ELSE excluded.estimated_edge END, "
+                "agent_verdict = CASE WHEN decision = 'entered' THEN agent_verdict ELSE excluded.agent_verdict END, "
+                "agent_summary = CASE WHEN decision = 'entered' THEN agent_summary ELSE excluded.agent_summary END",
+                (
+                    values["market_ticker"],
+                    values["evaluated_at"],
+                    values["evaluated_at"],
+                    values["closes_at"],
+                    values["decision"],
+                    values["reason"],
+                    values.get("side"),
+                    values.get("reference_spot"),
+                    values.get("target_price"),
+                    values.get("modeled_probability"),
+                    values.get("entry_price"),
+                    values.get("estimated_edge"),
+                    values.get("agent_verdict"),
+                    values.get("agent_summary"),
+                ),
+            )
+
+    def paper_15m_evaluations(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM paper_15m_evaluations ORDER BY closes_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def open_paper_15m_positions(self) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM paper_15m_positions WHERE status = 'open' ORDER BY opened_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def settle_paper_15m_position(
+        self,
+        market_ticker: str,
+        *,
+        result: str,
+        settled_at: str,
+        payout_usd: float,
+        pnl_usd: float,
+        return_pct: float,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE paper_15m_positions SET status = 'settled', result = ?, settled_at = ?, "
+                "payout_usd = ?, pnl_usd = ?, return_pct = ? WHERE market_ticker = ?",
+                (result, settled_at, payout_usd, pnl_usd, return_pct, market_ticker),
+            )
+
+    def paper_15m_positions(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM paper_15m_positions ORDER BY opened_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def paper_15m_summary(self, initial_equity: float = 1000) -> dict[str, object]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*), SUM(status = 'open'), SUM(status = 'settled'), "
+                "SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END), COALESCE(SUM(pnl_usd), 0), "
+                "AVG(CASE WHEN status = 'settled' THEN return_pct END) "
+                "FROM paper_15m_positions"
+            ).fetchone()
+            evaluated = connection.execute(
+                "SELECT COUNT(*) FROM paper_15m_evaluations"
+            ).fetchone()[0]
+        return {
+            "positions": int(row[0]),
+            "evaluated": int(evaluated),
+            "open": int(row[1] or 0),
+            "settled": int(row[2] or 0),
+            "wins": int(row[3] or 0),
+            "realized_pnl": float(row[4] or 0),
+            "average_return": None if row[5] is None else float(row[5]),
+            "equity": initial_equity + float(row[4] or 0),
         }
