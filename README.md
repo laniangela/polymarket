@@ -44,6 +44,11 @@ earliest BTC events, maintains a heartbeat, and reconnects with bounded exponent
 dashboard reports recorder health and recent observations. This process is read-only and has no
 order endpoint.
 
+The recorder also samples the Microstructure Agent every 15 seconds per tracked contract. Each
+signal is evaluated at 5, 15, 30, and 60-second horizons using the recorded entry ask and first
+available exit bid after the horizon. The validation report separates resolved observations from
+actually executable outcomes and subtracts estimated fees from hypothetical returns.
+
 ## Current agents
 
 - Contract interpreter: validates event, range, expiry, and settlement rules.

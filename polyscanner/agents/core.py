@@ -133,6 +133,9 @@ class MicrostructureAgent:
         _: ProbabilityEstimate,
     ) -> AgentOpinion:
         feature = self.features.calculate(contract.market_id)
+        return self.evaluate_features(feature)
+
+    def evaluate_features(self, feature: MicrostructureFeatures) -> AgentOpinion:
         if feature.latest_observation_at is None:
             return AgentOpinion(
                 self.name,

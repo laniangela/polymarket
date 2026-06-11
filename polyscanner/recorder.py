@@ -21,6 +21,7 @@ from polyscanner.live import (
 from polyscanner.parser import parse_threshold_contract
 from polyscanner.providers import CoinbasePublicClient, KalshiPublicClient
 from polyscanner.storage import SnapshotStore
+from polyscanner.validation import MicrostructureValidator
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class LiveFeedRecorder:
         self.coinbase_spot: float | None = None
         self.brti: BrtiSnapshot | None = None
         self.books: dict[str, OrderBookState] = {}
+        self.validator = MicrostructureValidator(self.store)
 
     def stop(self, *_: Any) -> None:
         self.running = False
@@ -209,6 +211,11 @@ class LiveFeedRecorder:
             yes_ask=quote.yes_ask,
             yes_bid_size=quote.yes_bid_size,
             yes_ask_size=quote.yes_ask_size,
+        )
+        self.validator.process_quote(
+            quote.market_ticker,
+            quote.received_at,
+            quote.yes_bid,
         )
 
     def _record(

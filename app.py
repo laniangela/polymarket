@@ -190,6 +190,71 @@ else:
                 hide_index=True,
             )
 
+st.subheader("Microstructure validation")
+validation_counts = store().validation_counts()
+validation_summary = store().validation_summary()
+validation_cols = st.columns(4)
+validation_cols[0].metric("Signals recorded", validation_counts["signals"])
+validation_cols[1].metric("SUPPORT signals", validation_counts["supports"])
+validation_cols[2].metric("Horizons resolved", validation_counts["resolved"])
+validation_cols[3].metric("Executable outcomes", validation_counts["executable"])
+if not validation_summary:
+    st.info(
+        "No forward outcomes have been resolved yet. The recorder will evaluate each tracked "
+        "contract and score its 5s, 15s, 30s, and 60s executable result."
+    )
+else:
+    summary_frame = pd.DataFrame(validation_summary).rename(
+        columns={
+            "verdict": "Agent verdict",
+            "horizon_seconds": "Target horizon",
+            "outcomes": "Resolved",
+            "executable": "Executable",
+            "favorable_rate": "Positive after fees",
+            "average_net_return": "Average net return",
+            "average_elapsed_seconds": "Actual elapsed",
+        }
+    )
+    st.dataframe(
+        summary_frame.style.format(
+            {
+                "Target horizon": "{}s",
+                "Positive after fees": "{:.1%}",
+                "Average net return": "{:+.2%}",
+                "Actual elapsed": "{:.1f}s",
+            },
+            na_rep="Not executable",
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "Returns assume buying YES at the recorded ask and selling at the first recorded bid "
+        "after the target horizon, less estimated entry and exit fees."
+    )
+with st.expander("Recent Microstructure Agent signals"):
+    recent_signals = store().recent_microstructure_signals(limit=50)
+    if recent_signals:
+        st.dataframe(
+            pd.DataFrame(recent_signals)[
+                [
+                    "evaluated_at",
+                    "market_ticker",
+                    "verdict",
+                    "summary",
+                    "entry_bid",
+                    "entry_ask",
+                    "spread",
+                    "coinbase_momentum_60s_bps",
+                    "repricing_delay_seconds",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.caption("No validation signals recorded yet.")
+
 st.subheader("Best opportunities now")
 st.write(
     "Every live BTC price bucket is reviewed automatically. The table ranks modeled gaps after "
